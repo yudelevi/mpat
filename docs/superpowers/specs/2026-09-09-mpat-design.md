@@ -154,6 +154,8 @@ All subclass `mpat.MpatError`.
 - `LockError`: malformed lock or unknown lock `version`. Raised by the CLI.
   At runtime it is downgraded to a single warning and the lock is ignored,
   because a broken lock must not break the application.
+- `ForbiddenTarget`: target matches the denylist (see Security posture).
+  Raised at decoration, always.
 
 ## Fingerprint
 
@@ -236,11 +238,32 @@ observed in practice.
 ```toml
 [tool.mpat]
 modules = ["endpoints.common.litellm_patches", "app"]
+allow = []   # denylist overrides, e.g. ["ssl.SSLContext.load_verify_locations"]
 ```
 
 `mpat lock` and `mpat check` import the listed modules under `MPAT_COLLECT=1`.
 Explicit listing over import discovery: discovery by importing arbitrary
 application code is where such tools become flaky.
+
+## Security posture
+
+mpat is not a sandbox and does not claim to be one. Any code executing in the
+interpreter can `setattr` anything without going through mpat; there is no
+permission boundary inside a Python process. mpat provides two weaker
+guarantees and documents them as such:
+
+1. **Guardrail against accidental patches of security-critical code.**
+   `patch()` and `watch()` refuse targets matching a denylist with
+   `ForbiddenTarget`. Default denylist: `mpat.*`, `builtins.*`, `sys.*`,
+   `importlib.*`, `ssl.*`, `hashlib.*`, `hmac.*`, `secrets.*`,
+   `cryptography.*`, `certifi.*`. The list is overridable only through
+   `[tool.mpat] allow` in `pyproject.toml`, never through a decorator
+   argument, so every override appears in a configuration diff that a
+   reviewer reads.
+2. **Audit trail.** Every declared patch and watch is in `mpat.lock`, the lock
+   is committed, and `mpat check` fails CI on `unlocked`. A patch that appears
+   in code without a lock entry does not pass the pipeline. Reviewers get one
+   file listing everything the application overrides in upstream, with notes.
 
 ## CLI
 
