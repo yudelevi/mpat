@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from mpat import _config, _registry
+
 FIXTURE_ROOT = Path(__file__).parent / "fake_upstream"
 PKG = "fakeup"
 
@@ -47,6 +49,10 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("MPAT_COLLECT", raising=False)
     monkeypatch.delenv("MPAT_STRICT", raising=False)
+    _registry.reset()
+    _config.reset_caches()
     yield
+    _registry.reset()
+    _config.reset_caches()
     for name in set(sys.modules) - before:
         sys.modules.pop(name, None)
