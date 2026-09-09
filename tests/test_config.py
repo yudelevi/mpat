@@ -17,6 +17,7 @@ def test_walks_up(tmp_path):
     nested = tmp_path / "src" / "pkg"
     nested.mkdir(parents=True)
     cfg = _config.load_config(nested)
+    assert cfg is not None
     assert cfg.root == tmp_path
     assert cfg.modules == ("a.b",)
     assert cfg.allow == ("ssl.x",)
@@ -25,14 +26,21 @@ def test_walks_up(tmp_path):
 def test_missing_tool_section(tmp_path):
     write_pyproject(tmp_path)
     cfg = _config.load_config(tmp_path)
+    assert cfg is not None
     assert cfg.modules == ()
     assert cfg.allow == ()
 
 
 def test_runtime_config_is_cached(tmp_path):
     write_pyproject(tmp_path, '[tool.mpat]\nmodules = ["a"]\n')
-    assert _config.runtime_config().modules == ("a",)
+    cached = _config.runtime_config()
+    assert cached is not None
+    assert cached.modules == ("a",)
     write_pyproject(tmp_path, '[tool.mpat]\nmodules = ["b"]\n')
-    assert _config.runtime_config().modules == ("a",)
+    still_cached = _config.runtime_config()
+    assert still_cached is not None
+    assert still_cached.modules == ("a",)
     _config.reset_caches()
-    assert _config.runtime_config().modules == ("b",)
+    fresh = _config.runtime_config()
+    assert fresh is not None
+    assert fresh.modules == ("b",)

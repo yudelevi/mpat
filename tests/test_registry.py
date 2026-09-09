@@ -53,9 +53,8 @@ def test_collect_declarations_imports_under_collect(monkeypatch):
         seen["collect"] = os.environ.get(reg.COLLECT_ENV)
         reg.register(decl(target="p.q", identity=("/collect_probe.py", "g")))
 
-    mod.body = body
     monkeypatch.setitem(sys.modules, "collect_probe", mod)
-    monkeypatch.setattr("importlib.import_module", lambda name: (mod.body(), mod)[1])
+    monkeypatch.setattr("importlib.import_module", lambda name: (body(), mod)[1])
     result = reg.collect_declarations(["collect_probe"])
     assert seen["collect"] == "1"
     assert os.environ.get(reg.COLLECT_ENV) is None

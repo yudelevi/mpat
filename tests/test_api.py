@@ -4,6 +4,7 @@ import logging
 import sys
 import textwrap
 import warnings
+from typing import Any
 
 import pytest
 
@@ -29,8 +30,9 @@ def test_patch_module_function(upstream):
         return original(name, punct).upper()
 
     assert fakeup.core.greet("bob") == "HI BOB!"
-    assert fakeup.core.greet.__mpat_target__ == "fakeup.core.greet"
-    assert fakeup.core.greet.__wrapped__ is fakeup.core.greet.__mpat_original__
+    patched: Any = fakeup.core.greet
+    assert patched.__mpat_target__ == "fakeup.core.greet"
+    assert patched.__wrapped__ is patched.__mpat_original__
     assert loud(lambda n, p: "x", "a") == "X"
 
 

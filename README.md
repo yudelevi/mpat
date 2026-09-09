@@ -178,3 +178,12 @@ Properties, custom descriptors and metaclass attributes can be watched, not
 patched. A replacement must be the same kind of callable as the original: sync
 for sync, async for async, generator for generator. Per-instance patching,
 undo, and diff-based patching are out of scope.
+
+## Development
+
+```
+uv run pytest
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run ty check src tests
+```
