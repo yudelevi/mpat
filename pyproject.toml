@@ -25,6 +25,9 @@ Repository = "https://github.com/yudelevi/mpat"
 [project.scripts]
 mpat = "mpat._cli:main"
 
+[project.entry-points.pytest11]
+mpat = "mpat._pytest_plugin"
+
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]
 build-backend = "uv_build"

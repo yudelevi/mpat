@@ -14,6 +14,7 @@ class Config:
     root: Path
     modules: tuple[str, ...]
     allow: tuple[str, ...]
+    declared: bool = False
 
 
 def find_project_root(start: Path) -> Path | None:
@@ -28,11 +29,13 @@ def load_config(start: Path | None = None) -> Config | None:
     if root is None:
         return None
     data = tomllib.loads((root / PYPROJECT).read_text(encoding="utf-8"))
-    section = data.get("tool", {}).get(TOOL_SECTION, {})
+    tool = data.get("tool", {})
+    section = tool.get(TOOL_SECTION, {})
     return Config(
         root=root,
         modules=tuple(section.get("modules", ())),
         allow=tuple(section.get("allow", ())),
+        declared=TOOL_SECTION in tool,
     )
 
 
