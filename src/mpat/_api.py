@@ -94,6 +94,12 @@ def _handle_drift(decl: Declaration, resolved: Resolved) -> bool:
     return action != ON_DRIFT_SKIP
 
 
+def _declares_directly(resolved: Resolved) -> bool:
+    if not inspect.isclass(resolved.parent):
+        return True
+    return resolved.attr in vars(resolved.parent)
+
+
 def _live_original(resolved: Resolved, decl: Declaration) -> Any:
     live = inspect.getattr_static(resolved.parent, resolved.attr)
     if isinstance(live, (staticmethod, classmethod)):
@@ -103,11 +109,12 @@ def _live_original(resolved: Resolved, decl: Declaration) -> Any:
         return getattr(live, ORIGINAL_ATTR)
     if identity is not None:
         raise AlreadyPatched(f"{decl.target} already patched by {identity[0]}:{identity[1]}")
-    earlier = applied_for(id(live))
-    if earlier is not None:
-        raise AlreadyPatched(
-            f"{decl.target} resolves to the object already patched as {earlier.target}"
-        )
+    if _declares_directly(resolved):
+        earlier = applied_for(id(live))
+        if earlier is not None:
+            raise AlreadyPatched(
+                f"{decl.target} resolves to the object already patched as {earlier.target}"
+            )
     return live
 
 

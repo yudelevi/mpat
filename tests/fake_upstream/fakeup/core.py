@@ -53,3 +53,16 @@ try:
         return "guarded"
 except ImportError:
     pass
+
+
+class Base:
+    def go(self):
+        return "base"
+
+
+class Child(Base):
+    pass
+
+
+class Other(Base):
+    pass

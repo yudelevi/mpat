@@ -63,7 +63,10 @@ string, `Probe` takes a zero-argument callable, and both combine with `|` and
 `&`. `review_by` is a nag date only. `on_drift="warn" | "skip" | "raise"`
 decides what happens at import when the lock no longer matches; `MPAT_STRICT=1`
 forces `raise`. Passing a target as an object instead of a dotted string works
-too, resolved through `__module__` and `__qualname__`.
+too, resolved through `__module__` and `__qualname__`. Two dotted targets that
+name the same attribute of the same owner are refused as aliases, but the same
+inherited method on two sibling subclasses is not an alias: each patch lands on
+its own class and the base class is left alone.
 
 ## Lock and check
 

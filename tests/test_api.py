@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 import mpat
-from mpat import _lock, _registry
+from mpat import _api, _lock, _registry
 from mpat._errors import (
     AlreadyPatched,
     ForbiddenTarget,
@@ -292,3 +292,20 @@ def test_watch_unsupported_targets_are_fine(upstream):
 
 def test_public_surface():
     assert {"patch", "watch", "Version", "Probe", "Until"} <= set(mpat.__all__)
+
+
+def test_inherited_method_patchable_on_sibling_subclasses(upstream):
+    import fakeup.core
+
+    @mpat.patch("fakeup.core.Child.go")
+    def child_go(original, self):
+        return original(self) + "-child"
+
+    @mpat.patch("fakeup.core.Other.go")
+    def other_go(original, self):
+        return original(self) + "-other"
+
+    assert fakeup.core.Child().go() == "base-child"
+    assert fakeup.core.Other().go() == "base-other"
+    assert fakeup.core.Base().go() == "base"
+    assert not hasattr(vars(fakeup.core.Base)["go"], _api.IDENTITY_ATTR)
