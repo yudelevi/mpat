@@ -33,6 +33,10 @@ _ENTRY_KEY = "entry"
 _VERSION_KEY = "version"
 _FINGERPRINT_FIELDS = tuple(f.name for f in dataclasses.fields(Fingerprint))
 
+_UMASK = os.umask(0)
+os.umask(_UMASK)
+_LOCK_MODE = 0o666 & ~_UMASK
+
 
 @dataclass(frozen=True)
 class LockEntry:
@@ -101,10 +105,14 @@ def _entry_from_dict(target: str, data: dict[str, Any]) -> LockEntry:
 def read_lock(path: Path) -> Lock:
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (tomllib.TOMLDecodeError, OSError) as exc:
+    except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError) as exc:
         raise LockError(f"{path}: {exc}") from exc
     version = data.get(_VERSION_KEY)
-    if version not in SUPPORTED_VERSIONS:
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version not in SUPPORTED_VERSIONS
+    ):
         raise LockError(
             f"{path}: lock version {version!r} not supported (supported: {SUPPORTED_VERSIONS})"
         )
@@ -126,6 +134,7 @@ def write_lock(path: Path, lock: Lock) -> None:
     try:
         with os.fdopen(fd, "wb") as fh:
             tomli_w.dump(payload, fh)
+        os.chmod(tmp, _LOCK_MODE)
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):

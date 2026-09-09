@@ -1,4 +1,5 @@
 import dataclasses
+import os
 import warnings
 from datetime import date
 from pathlib import Path
@@ -80,6 +81,42 @@ def test_read_rejects_garbage(tmp_path):
     path.write_text("not = [toml")
     with pytest.raises(LockError):
         _lock.read_lock(path)
+
+
+def test_read_rejects_binary_corruption(tmp_path):
+    path = tmp_path / "mpat.lock"
+    path.write_bytes(b"\xff\xfe\x00version")
+    with pytest.raises(LockError):
+        _lock.read_lock(path)
+
+
+def test_runtime_lock_binary_corruption_warns_once(tmp_path):
+    root = project(tmp_path)
+    _lock.lock_path(root).write_bytes(b"\xff\xfe\x00version")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert _lock.runtime_lock() is None
+        assert _lock.runtime_lock() is None
+    assert len(caught) == 1
+    assert "mpat.lock" in str(caught[0].message)
+
+
+def test_read_rejects_bool_version(tmp_path):
+    path = tmp_path / "mpat.lock"
+    path.write_text("version = true\n")
+    with pytest.raises(LockError):
+        _lock.read_lock(path)
+
+
+def test_write_lock_sets_readable_permissions(tmp_path):
+    root = project(tmp_path)
+    lock = _lock.build_lock([], root=root)
+    path = _lock.lock_path(root)
+    _lock.write_lock(path, lock)
+    umask = os.umask(0)
+    os.umask(umask)
+    expected = 0o666 & ~umask
+    assert path.stat().st_mode & 0o777 == expected
 
 
 def statuses(results):
