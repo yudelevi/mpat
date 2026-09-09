@@ -162,7 +162,7 @@ def fingerprint(resolved: Resolved) -> Fingerprint:
     dist, dist_version = _dist(top)
 
     if kind == KIND_ATTRIBUTE:
-        hash_target = obj.fget if isinstance(obj, property) else None
+        raw_target = obj.fget if isinstance(obj, property) else None
         if isinstance(obj, property):
             value_repr = None
         elif isinstance(obj, SCALARS) or (
@@ -172,9 +172,10 @@ def fingerprint(resolved: Resolved) -> Fingerprint:
         else:
             value_repr = UNHASHABLE
     else:
-        hash_target = inspect.unwrap(obj)
+        raw_target = obj
         value_repr = None
 
+    hash_target = inspect.unwrap(raw_target) if raw_target is not None else None
     file = _source_file(hash_target) if hash_target is not None else None
     source_hash = _source_hash(hash_target, file) if file else None
     expects_source = hash_target is not None

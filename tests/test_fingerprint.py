@@ -111,6 +111,17 @@ def test_property_hashes_fget(upstream):
     assert fp.compare(locked=p, current=fingerprint_of("fakeup.core.Store.size")) == fp.BODY
 
 
+def test_property_with_wrapped_getter_hashes_definition_site(upstream):
+    upstream.edit(
+        "core.py",
+        "    @property\n    def size(self):",
+        '    @property\n    @tag("p")\n    def size(self):',
+    )
+    p = fingerprint_of("fakeup.core.Store.size")
+    assert p.source_hash
+    assert p.source_file == "fakeup/core.py"
+
+
 def test_reexport_resolves_to_definition(upstream):
     a = fingerprint_of("fakeup.greet_alias")
     assert a.resolved == "fakeup.core.greet"
