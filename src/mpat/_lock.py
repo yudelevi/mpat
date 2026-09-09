@@ -170,10 +170,6 @@ def _status(w: Wanted, entry: LockEntry, today: date) -> tuple[str, Fingerprint 
         current = fingerprint(resolve(w.target))
     except TargetNotFound:
         return MISSING, None
-    except ImportError as exc:
-        if isinstance(exc, ModuleNotFoundError):
-            raise
-        return MISSING, None
     result = compare(locked=entry.fingerprint, current=current)
     if result == OK and w.decl.review_by is not None and today > w.decl.review_by:
         return REVIEW, current

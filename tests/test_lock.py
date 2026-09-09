@@ -110,12 +110,21 @@ def test_check_body_and_value(upstream, tmp_path):
 
 def test_check_missing(upstream, tmp_path):
     root = project(tmp_path)
+    decls = [decl("fakeup.core.agreet")]
+    lock = _lock.build_lock(decls, root=root)
+    upstream.edit("core.py", "async def agreet(", "async def agreet_renamed(")
+    assert statuses(_lock.check(decls, lock, root=root, today=TODAY)) == {
+        "fakeup.core.agreet": _lock.MISSING
+    }
+
+
+def test_check_propagates_upstream_import_errors(upstream, tmp_path):
+    root = project(tmp_path)
     decls = [decl("fakeup.core.greet")]
     lock = _lock.build_lock(decls, root=root)
     upstream.edit("core.py", "def greet(", "def greet_renamed(")
-    assert statuses(_lock.check(decls, lock, root=root, today=TODAY)) == {
-        "fakeup.core.greet": _lock.MISSING
-    }
+    with pytest.raises(ImportError):
+        _lock.check(decls, lock, root=root, today=TODAY)
 
 
 def test_check_unlocked_and_stale(upstream, tmp_path):
