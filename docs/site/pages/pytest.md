@@ -1,59 +1,81 @@
 # pytest
 
-`mpat.testing` gives you the same check as a pytest test, so drift shows up in the
-same run as everything else.
+Installing mpat is the whole setup. mpat ships a pytest plugin that registers
+itself through the `pytest11` entry point, so any project with `[tool.mpat]` in
+its `pyproject.toml` gets the drift checks in its normal pytest run.
+
+```
+mpat::drift[somelib.client.Client.request] PASSED
+mpat::still-needed[somelib.client.Client.request] PASSED
+```
+
+The items are generated, not written. They live under a `mpat` collector rather
+than a file of yours, and they carry the `mpat` marker, so `-m mpat` runs only
+them and `-k drift` narrows further.
+
+Disable the whole set with `--no-mpat`, or permanently:
+
+```toml
+[tool.pytest.ini_options]
+mpat = false
+```
+
+## `drift[...]`
+
+One item per declared target, per `depends_on` entry, and per lockfile entry that
+is no longer declared. The item name is the dotted target, so a failure names the
+symbol directly.
+
+```
+FAILED mpat::drift[somelib.client.Client.request]
+  somelib.client.Client.request: body. Works around somelib#123.
+```
+
+The status is the same value `mpat check` prints, and the text after it is the
+declaration's `note`. See [the status table](cli.md#statuses).
+
+## `still-needed[...]`
+
+One item per patch that has an `until`. It fails once the condition comes true,
+which is the point at which the patch should be deleted.
+
+```
+FAILED mpat::still-needed[somelib.client.Client.request]
+  somelib.client.Client.request: upstream fixed, delete this patch.
+    Works around somelib#123.
+```
+
+Patches with no `until` produce no item here.
+
+## The unconfigured case
+
+A project with `[tool.mpat]` and an empty `modules` collects one item, and it
+fails:
+
+```
+FAILED mpat::unconfigured
+  <unconfigured>: unconfigured.
+    no [tool.mpat] modules found; add modules to pyproject.toml
+```
+
+It fails rather than skipping on purpose. A typo in the module list would
+otherwise collect zero items and leave the suite green with no coverage at all.
+
+A project with no `[tool.mpat]` section is a different case: the plugin stays
+inert, collects nothing, and says nothing.
+
+## The explicit form
+
+The pre-plugin form still works, for projects that would rather see the tests in
+a file they own:
 
 ```python
 # tests/test_upstream.py
 from mpat.testing import test_upstream_drift, test_patch_still_needed
 ```
 
-Importing the names is the whole setup. Both are parametrized tests, so pytest
-collects them from your module as if you had written them there.
-
-## `test_upstream_drift`
-
-One test per declared target, per `depends_on` entry, and per lockfile entry that
-is no longer declared. The test id is the dotted target, so a failure names the
-symbol directly.
-
-```
-FAILED tests/test_upstream.py::test_upstream_drift[somelib.client.Client.request]
-  AssertionError: somelib.client.Client.request: body. Works around somelib#123.
-```
-
-The status is the same value `mpat check` prints, and the text after it is the
-declaration's `note`. See [the status table](cli.md#statuses).
-
-## `test_patch_still_needed`
-
-One test per patch that has an `until`. It fails once the condition comes true,
-which is the point at which the patch should be deleted.
-
-```
-FAILED tests/test_upstream.py::test_patch_still_needed[somelib.client.Client.request]
-  AssertionError: somelib.client.Client.request: upstream fixed, delete this patch.
-    Works around somelib#123.
-```
-
-Patches with no `until` produce no test here.
-
-## The unconfigured case
-
-If the project has no `pyproject.toml`, or `[tool.mpat] modules` is empty,
-`test_upstream_drift` runs once and fails:
-
-```
-FAILED tests/test_upstream.py::test_upstream_drift[<unconfigured>]
-  AssertionError: <unconfigured>: unconfigured.
-    no [tool.mpat] modules found; add modules to pyproject.toml
-```
-
-It fails rather than skipping on purpose. A typo in the module list would
-otherwise collect zero tests and leave the suite green with no coverage at all.
-
-`test_patch_still_needed` collects nothing in that case, because there are no
-declarations to read `until` from.
+When both are present the explicit module wins and the plugin adds nothing, so
+the checks never run twice.
 
 ## Programmatic access
 
@@ -70,8 +92,9 @@ for result in drift_results():
 `drift_results()` returns the same `CheckResult` objects behind `mpat check`.
 `until_declarations()` returns the declarations that have an `until`.
 
-Both are called at collection time, which means your patch modules are imported
-during collection with `MPAT_COLLECT=1`. Nothing is patched by the import.
+Both read your patch modules, which means they are imported with
+`MPAT_COLLECT=1` at collection time. Nothing is patched by the import, and the
+plugin imports them once per session.
 
 ## pre-commit
 

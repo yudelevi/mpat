@@ -21,6 +21,7 @@ def test_walks_up(tmp_path):
     assert cfg.root == tmp_path
     assert cfg.modules == ("a.b",)
     assert cfg.allow == ("ssl.x",)
+    assert cfg.declared
 
 
 def test_missing_tool_section(tmp_path):
@@ -29,6 +30,7 @@ def test_missing_tool_section(tmp_path):
     assert cfg is not None
     assert cfg.modules == ()
     assert cfg.allow == ()
+    assert not cfg.declared
 
 
 def test_runtime_config_is_cached(tmp_path):

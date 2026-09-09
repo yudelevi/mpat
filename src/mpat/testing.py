@@ -1,75 +1,50 @@
-"""Generated pytest tests. Import both names into one test module per service:
+"""Generated pytest tests.
+
+Installing mpat is enough: the pytest plugin collects these tests as `mpat::...`
+for any project with `[tool.mpat]` in its pyproject. Importing both names into a
+test module is still supported for projects that want them written out:
 
 from mpat.testing import test_upstream_drift, test_patch_still_needed
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date
-from pathlib import Path
-
 import pytest
 
-from mpat._config import load_config
-from mpat._fingerprint import OK
-from mpat._lock import CheckResult, Lock, check, lock_path, read_lock
-from mpat._registry import Declaration, collect_declarations
+from mpat._generated import (
+    UNCONFIGURED_NOTE,
+    UNCONFIGURED_ROLE,
+    UNCONFIGURED_STATUS,
+    UNCONFIGURED_TARGET,
+    Collected,
+    drift_message,
+    drift_ok,
+    drift_results,
+    still_needed_message,
+    until_declarations,
+)
+from mpat._lock import CheckResult
+from mpat._registry import Declaration
 
-UNCONFIGURED_TARGET = "<unconfigured>"
-UNCONFIGURED_ROLE = "config"
-UNCONFIGURED_STATUS = "unconfigured"
-UNCONFIGURED_NOTE = "no [tool.mpat] modules found; add modules to pyproject.toml"
-
-
-@dataclass(frozen=True)
-class Collected:
-    declarations: list[Declaration]
-    lock: Lock
-    root: Path
-
-
-def _collected() -> Collected | None:
-    config = load_config()
-    if config is None or not config.modules:
-        return None
-    path = lock_path(config.root)
-    return Collected(
-        declarations=collect_declarations(config.modules),
-        lock=read_lock(path) if path.is_file() else Lock(entries={}),
-        root=config.root,
-    )
-
-
-def drift_results() -> list[CheckResult]:
-    collected = _collected()
-    if collected is None:
-        return [
-            CheckResult(
-                target=UNCONFIGURED_TARGET,
-                role=UNCONFIGURED_ROLE,
-                status=UNCONFIGURED_STATUS,
-                note=UNCONFIGURED_NOTE,
-            )
-        ]
-    return check(collected.declarations, collected.lock, root=collected.root, today=date.today())
-
-
-def until_declarations() -> list[Declaration]:
-    collected = _collected()
-    if collected is None:
-        return []
-    return [d for d in collected.declarations if d.until is not None]
+__all__ = [
+    "UNCONFIGURED_NOTE",
+    "UNCONFIGURED_ROLE",
+    "UNCONFIGURED_STATUS",
+    "UNCONFIGURED_TARGET",
+    "Collected",
+    "drift_results",
+    "test_patch_still_needed",
+    "test_upstream_drift",
+    "until_declarations",
+]
 
 
 @pytest.mark.parametrize("result", [pytest.param(r, id=r.target) for r in drift_results()])
 def test_upstream_drift(result: CheckResult) -> None:
-    assert result.status == OK, f"{result.target}: {result.status}. {result.note}".rstrip()
+    assert drift_ok(result), drift_message(result)
 
 
 @pytest.mark.parametrize("decl", [pytest.param(d, id=d.target) for d in until_declarations()])
 def test_patch_still_needed(decl: Declaration) -> None:
     assert decl.until is not None
-    assert not decl.until(), (
-        f"{decl.target}: upstream fixed, delete this patch. {decl.note}".rstrip()
-    )
+    assert not decl.until(), still_needed_message(decl)

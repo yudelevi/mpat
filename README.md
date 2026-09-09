@@ -170,15 +170,26 @@ change, fix or delete the patch, run `mpat lock`, commit.
 
 ## pytest
 
+Install mpat, add `[tool.mpat]`, run pytest. The tests register themselves:
+
+```
+mpat::drift[somelib.client.Client.request] PASSED
+mpat::still-needed[somelib.client.Client.request] PASSED
+```
+
+One `drift` item per declared or locked target, one `still-needed` item per
+patch with `until`. Disable the set with `--no-mpat`, or `mpat = false` under
+`[tool.pytest.ini_options]`. A project with `[tool.mpat]` and an empty `modules`
+gets a single failing `mpat::unconfigured` item rather than a green run, so a
+typo in the module list cannot turn the safety net green. A project with no
+`[tool.mpat]` at all collects nothing.
+
+The explicit form still works and wins when both are present:
+
 ```python
 # tests/test_upstream.py
 from mpat.testing import test_upstream_drift, test_patch_still_needed
 ```
-
-One test per declared or locked target, one per patch with `until`. If the
-project has no `pyproject.toml` or an empty `[tool.mpat] modules`,
-`test_upstream_drift` fails with that message rather than skipping, so a typo in
-the module list cannot turn the safety net green.
 
 ## pre-commit
 
