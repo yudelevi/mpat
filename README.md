@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/mpat-lockup-dark.svg">
+    <img src="assets/mpat-lockup-light.svg" alt="mpat" width="420">
+  </picture>
+</p>
+
 # mpat
 
 Lockfile-based upstream drift tracking for Python monkeypatches.
