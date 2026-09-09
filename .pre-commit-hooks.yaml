@@ -2,6 +2,6 @@
   name: mpat check
   description: Fail when declared monkeypatches are unlocked or upstream drifted.
   entry: mpat check
-  language: python
+  language: system
   pass_filenames: false
   always_run: true

@@ -29,7 +29,7 @@ Python 3.11+.
 ```python
 from datetime import date
 
-import somelib
+import somelib.client
 from mpat import Probe, Version, patch, watch
 
 
@@ -53,7 +53,11 @@ watch("somelib.settings.MAX_RETRIES", note="see somelib#98")
 ```
 
 The patched function receives `original` first. `watch` fingerprints without
-patching: constants, registries, call sites, anything you rely on. `until`
+patching. It tracks the body of functions and classes, the getter of a
+property, and the value of scalar constants and tuples of scalars. Every other
+attribute, including dicts, lists and custom descriptors, is recorded as
+existence only, so mutating a watched registry's contents will not fail
+`mpat check`; watch the function or class that populates it instead. `until`
 turns the patch off once upstream is fixed; `Version` takes a requirement
 string, `Probe` takes a zero-argument callable, and both combine with `|` and
 `&`. `review_by` is a nag date only. `on_drift="warn" | "skip" | "raise"`
@@ -160,24 +164,34 @@ One test per declared or locked target, one per patch with `until`.
 ## pre-commit
 
 ```yaml
-- repo: https://github.com/yudelevi/mpat
-  rev: v0.1.0
+- repo: local
   hooks:
     - id: mpat-check
+      name: mpat check
+      entry: uv run mpat check
+      language: system
+      pass_filenames: false
+      always_run: true
 ```
+
+The hook has to run inside the project environment, because `mpat check`
+imports your patch modules and the upstream packages they target. An isolated
+hook environment would not have them.
 
 ## What it will not do
 
 `mpat` is not a sandbox. Anything running in your interpreter can `setattr`
 without asking. It refuses a short denylist (`mpat`, `builtins`, `sys`,
 `importlib`, `ssl`, `hashlib`, `hmac`, `secrets`, `cryptography`, `certifi`)
-so nobody patches those by accident; override with `[tool.mpat] allow`.
+so nobody patches or watches those by accident; the denylist applies to both
+`patch` and `watch`. Override it with `[tool.mpat] allow`.
 
 Only plain functions, staticmethods and classmethods can be patched.
 Properties, custom descriptors and metaclass attributes can be watched, not
-patched. A replacement must be the same kind of callable as the original: sync
-for sync, async for async, generator for generator. Per-instance patching,
-undo, and diff-based patching are out of scope.
+patched, and of those only a property is tracked by body, through its getter. A
+replacement must be the same kind of callable as the original: sync for sync,
+async for async, generator for generator. Per-instance patching, undo, and
+diff-based patching are out of scope.
 
 ## Development
 
@@ -186,4 +200,5 @@ uv run pytest
 uv run ruff check src tests
 uv run ruff format --check src tests
 uv run ty check src tests
+uv build
 ```
