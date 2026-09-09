@@ -8,6 +8,8 @@ import pytest
 
 from mpat import _config, _lock, _registry
 
+pytest_plugins = ["pytester"]
+
 FIXTURE_ROOT = Path(__file__).parent / "fake_upstream"
 PKG = "fakeup"
 
