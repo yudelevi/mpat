@@ -19,7 +19,9 @@ from mpat._errors import (
     UpstreamDriftError,
     UpstreamDriftWarning,
 )
+from mpat._fingerprint import fingerprint
 from mpat._registry import Declaration
+from mpat._targets import resolve
 
 
 def test_patch_module_function(upstream):
@@ -309,3 +311,83 @@ def test_inherited_method_patchable_on_sibling_subclasses(upstream):
     assert fakeup.core.Other().go() == "base-other"
     assert fakeup.core.Base().go() == "base"
     assert not hasattr(vars(fakeup.core.Base)["go"], _api.IDENTITY_ATTR)
+
+
+TARGET = "fakeup.core.greet"
+
+
+def reload_under_lock(tmp_path, monkeypatch, on_drift):
+    app = tmp_path / "app_patches.py"
+    app.write_text(
+        textwrap.dedent(
+            f"""
+            import mpat
+
+            @mpat.patch("fakeup.core.greet", on_drift="{on_drift}")
+            def shout(original, name, punct="!"):
+                return original(name, punct) + "!!"
+            """
+        )
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    return importlib.import_module("app_patches")
+
+
+def test_reload_under_lock_does_not_drift(upstream, tmp_path, monkeypatch):
+    locked_project(upstream, tmp_path)
+    import fakeup.core
+
+    original = fakeup.core.greet
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        module = reload_under_lock(tmp_path, monkeypatch, "warn")
+        importlib.reload(module)
+        importlib.reload(module)
+    assert fakeup.core.greet("a") == "hi a!!!"
+    assert getattr(fakeup.core.greet, _api.ORIGINAL_ATTR) is original
+    assert len(_registry.declarations()) == 1
+    lock = _lock.runtime_lock()
+    assert lock is not None
+    live = fingerprint(resolve(TARGET))
+    assert live.no_source is False
+    assert live.source_hash == lock.entries[TARGET].fingerprint.source_hash
+    sys.modules.pop("app_patches", None)
+
+
+def test_reload_under_lock_with_on_drift_skip_stays_applied(upstream, tmp_path, monkeypatch):
+    locked_project(upstream, tmp_path)
+    import fakeup.core
+
+    original = fakeup.core.greet
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        module = reload_under_lock(tmp_path, monkeypatch, "skip")
+        importlib.reload(module)
+        importlib.reload(module)
+    assert fakeup.core.greet("a") == "hi a!!!"
+    assert getattr(fakeup.core.greet, _api.ORIGINAL_ATTR) is original
+    sys.modules.pop("app_patches", None)
+
+
+def test_base_then_child_raises(upstream):
+    @mpat.patch("fakeup.core.Base.go")
+    def base_go(original, self):
+        return original(self) + "-base"
+
+    with pytest.raises(AlreadyPatched):
+
+        @mpat.patch("fakeup.core.Child.go")
+        def child_go(original, self):
+            return original(self) + "-child"
+
+
+def test_child_then_base_raises(upstream):
+    @mpat.patch("fakeup.core.Child.go")
+    def child_go(original, self):
+        return original(self) + "-child"
+
+    with pytest.raises(AlreadyPatched):
+
+        @mpat.patch("fakeup.core.Base.go")
+        def base_go(original, self):
+            return original(self) + "-base"
