@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/mpat-lockup-dark.svg">
-    <img src="assets/mpat-lockup-light.svg" alt="mpat" width="420">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/yudelevi/mpat/main/assets/mpat-lockup-dark.svg">
+    <img src="https://raw.githubusercontent.com/yudelevi/mpat/main/assets/mpat-lockup-light.svg" alt="mpat" width="420">
   </picture>
 </p>
 
