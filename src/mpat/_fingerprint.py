@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 import inspect
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
@@ -129,8 +130,17 @@ def _resolved_name(resolved: Resolved, kind: str) -> str:
     return f"{_owner_name(resolved.parent)}.{resolved.attr}"
 
 
+@functools.cache
+def _packages_distributions() -> Mapping[str, list[str]]:
+    return metadata.packages_distributions()
+
+
+def reset_caches() -> None:
+    _packages_distributions.cache_clear()
+
+
 def _dist(top: str) -> tuple[str | None, str | None]:
-    names = metadata.packages_distributions().get(top)
+    names = _packages_distributions().get(top)
     if not names:
         return None, None
     return names[0], metadata.version(names[0])
