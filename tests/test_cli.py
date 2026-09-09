@@ -1,8 +1,9 @@
 import json
+import sys
 import textwrap
 from pathlib import Path
 
-from mpat import _cli, _lock
+from mpat import _cli, _lock, _registry
 
 
 def project(tmp_path: Path, upstream) -> Path:
@@ -161,3 +162,54 @@ def test_show_no_source_target(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "no_source: True" in out
     assert "(no source available)" in out
+
+
+def test_check_footer_tells_the_user_to_lock(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["check"]) == _cli.EXIT_DRIFT
+    assert "3 unlocked: run 'mpat lock'" in capsys.readouterr().out
+
+
+def test_check_footer_separates_drift_review_and_stale(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    _cli.main(["lock"])
+    (root / "app_patches.py").write_text(
+        textwrap.dedent(
+            """
+            from datetime import date
+            import mpat
+
+            @mpat.patch("fakeup.core.greet", depends_on=["fakeup.LIMIT"],
+                        review_by=date(2020, 1, 1))
+            def shout(original, name, punct="!"):
+                return original(name, punct).upper()
+            """
+        )
+    )
+    upstream.edit("core.py", 'f"hi', 'f"hey')
+    _registry.reset()
+    sys.modules.pop("app_patches", None)
+    capsys.readouterr()
+    assert _cli.main(["check"]) == _cli.EXIT_DRIFT
+    out = capsys.readouterr().out
+    assert "1 drifted: read the upstream change" in out
+    assert "1 stale: run 'mpat lock' to prune" in out
+    assert "1 due for review" in out
+
+
+def test_check_groups_rows_by_distribution(tmp_path, upstream, monkeypatch, capsys):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\nmodules = ["app_patches"]\n'
+    )
+    (tmp_path / "app_patches.py").write_text(
+        'import mpat\n\nmpat.watch("packaging.version.Version")\nmpat.watch("fakeup.core.greet")\n'
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    _cli.main(["lock"])
+    capsys.readouterr()
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    lines = capsys.readouterr().out.splitlines()
+    assert "# packaging" in lines
+    assert "" in lines

@@ -69,6 +69,7 @@ class CheckResult:
     locked_version: str | None = None
     current_version: str | None = None
     no_source: bool = False
+    dist: str | None = None
 
 
 def lock_path(root: Path) -> Path:
@@ -172,15 +173,20 @@ def build_lock(declarations: Sequence[Declaration], *, root: Path) -> Lock:
     return Lock(entries=entries)
 
 
-def _status(w: Wanted, entry: LockEntry, today: date) -> tuple[str, Fingerprint | None]:
+def _current(target: str) -> Fingerprint | None:
     try:
-        current = fingerprint(resolve(w.target))
+        return fingerprint(resolve(target))
     except TargetNotFound:
-        return MISSING, None
+        return None
+
+
+def _status(w: Wanted, entry: LockEntry, current: Fingerprint | None, today: date) -> str:
+    if current is None:
+        return MISSING
     result = compare(locked=entry.fingerprint, current=current)
     if result == OK and w.decl.review_by is not None and today > w.decl.review_by:
-        return REVIEW, current
-    return result, current
+        return REVIEW
+    return result
 
 
 def check(
@@ -192,6 +198,7 @@ def check(
         seen.add(w.target)
         declared_in = _declared_in(w.decl, root)
         entry = lock.entries.get(w.target)
+        current = _current(w.target)
         if entry is None:
             results.append(
                 CheckResult(
@@ -200,24 +207,31 @@ def check(
                     status=UNLOCKED,
                     note=w.decl.note,
                     declared_in=declared_in,
+                    dist=current.dist if current else None,
                 )
             )
             continue
-        status, current = _status(w, entry, today)
         results.append(
             CheckResult(
                 target=w.target,
                 role=w.role,
-                status=status,
+                status=_status(w, entry, current, today),
                 note=w.decl.note,
                 declared_in=declared_in,
                 locked_version=entry.fingerprint.dist_version,
                 current_version=current.dist_version if current else None,
                 no_source=current.no_source if current else False,
+                dist=current.dist if current else entry.fingerprint.dist,
             )
         )
     results.extend(
-        CheckResult(target=t, role=e.role, status=STALE, declared_in=e.declared_in)
+        CheckResult(
+            target=t,
+            role=e.role,
+            status=STALE,
+            declared_in=e.declared_in,
+            dist=e.fingerprint.dist,
+        )
         for t, e in sorted(lock.entries.items())
         if t not in seen
     )

@@ -159,6 +159,10 @@ signature and async-ness alone, never on a body hash. `mpat lock` warns once per
 such entry and `mpat check` marks its row `[signature-only]`, because that is a
 much weaker guard than the rest of the table.
 
+Rows are grouped by installing distribution, and a footer counts each family so
+it is clear whether the answer is to run `mpat lock` or to read the upstream
+change.
+
 Run `mpat check` on dependency-bump MRs. When it fails, read the upstream
 change, fix or delete the patch, run `mpat lock`, commit.
 

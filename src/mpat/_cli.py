@@ -11,9 +11,21 @@ from pathlib import Path
 
 from mpat._config import Config, load_config
 from mpat._errors import LockError, MpatError
-from mpat._fingerprint import OK, fingerprint
+from mpat._fingerprint import (
+    BODY,
+    MOVED,
+    NO_SOURCE,
+    OK,
+    SIGNATURE,
+    VALUE,
+    fingerprint,
+)
 from mpat._lock import (
     LOCK_FILENAME,
+    MISSING,
+    REVIEW,
+    STALE,
+    UNLOCKED,
     CheckResult,
     Lock,
     build_lock,
@@ -40,6 +52,17 @@ _JSON_INDENT = 2
 _NO_DECLARATIONS = "no declarations found"
 _NO_SOURCE_MARKER = " [signature-only]"
 _NO_SOURCE_NOTICE = "no source available, only the signature is locked"
+_NO_DIST = "(no distribution)"
+_DRIFT_STATUSES = (MISSING, MOVED, SIGNATURE, BODY, VALUE, NO_SOURCE)
+_FOOTERS: tuple[tuple[tuple[str, ...], str], ...] = (
+    ((UNLOCKED,), "unlocked: run 'mpat lock'"),
+    (
+        _DRIFT_STATUSES,
+        "drifted: read the upstream change, then fix or delete the patch and run 'mpat lock'",
+    ),
+    ((STALE,), "stale: run 'mpat lock' to prune"),
+    ((REVIEW,), "due for review"),
+)
 
 
 def _require_config() -> Config:
@@ -92,11 +115,30 @@ def _status_cell(result: CheckResult) -> str:
     return result.status + (_NO_SOURCE_MARKER if result.no_source else "")
 
 
+def _print_footer(results: Sequence[CheckResult]) -> None:
+    lines = [
+        f"{count} {advice}"
+        for statuses, advice in _FOOTERS
+        if (count := sum(1 for r in results if r.status in statuses))
+    ]
+    if lines:
+        print()
+        print("\n".join(lines))
+
+
 def _print_table(results: Sequence[CheckResult]) -> None:
     status_width = max([_STATUS_WIDTH, *(len(_status_cell(r)) for r in results)])
     target_width = max((len(r.target) for r in results), default=0)
     source_width = max((len(r.declared_in) for r in results), default=0)
-    for r in results:
+    ordered = sorted(results, key=lambda r: (r.dist or "", r.target))
+    previous: str | None = None
+    for r in ordered:
+        group = r.dist or _NO_DIST
+        if group != previous:
+            if previous is not None:
+                print()
+            print(f"# {group}")
+            previous = group
         versions = ""
         if r.locked_version and r.current_version and r.locked_version != r.current_version:
             versions = f" {r.locked_version} -> {r.current_version}"
@@ -106,6 +148,7 @@ def _print_table(results: Sequence[CheckResult]) -> None:
             f"{r.target:<{target_width}} {r.declared_in:<{source_width}}{versions}{note}"
         )
         print(row.rstrip())
+    _print_footer(ordered)
 
 
 def cmd_check(args: argparse.Namespace) -> int:
