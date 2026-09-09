@@ -7,6 +7,9 @@
   `mpat::drift[...]` and `mpat::still-needed[...]` items in its normal pytest
   run, with no test module to write. A project with no `[tool.mpat]` collects
   nothing.
+- The generated items are collected by `pytest` and by `pytest <dir>`. An
+  argument that names a file or a nodeid selects only what it names, since items
+  that belong to no file cannot be narrowed by a path.
 - New `--no-mpat` flag, and a `mpat = false` ini option, to turn the generated
   items off.
 - `from mpat.testing import test_upstream_drift, test_patch_still_needed` keeps

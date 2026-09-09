@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,6 +23,16 @@ from mpat._generated import (
 from mpat._lock import CheckResult, lock_path
 from mpat._registry import Declaration
 
+if TYPE_CHECKING:
+    from _pytest._code.code import TerminalRepr, TracebackStyle
+
+# An entry-point plugin that fails to import breaks pytest for everyone who has
+# mpat installed, so the one private name needed at runtime is optional.
+try:
+    from _pytest.runner import collect_one_node
+except ImportError:
+    collect_one_node = None
+
 COLLECTOR_NAME = "mpat"
 DISABLE_OPTION = "--no-mpat"
 DISABLE_DEST = "no_mpat"
@@ -32,6 +43,7 @@ UNCONFIGURED_NAME = "unconfigured"
 DRIFT_NAME = "drift"
 STILL_NEEDED_NAME = "still-needed"
 TESTING_MODULE = "mpat.testing"
+NODEID_SEPARATOR = "::"
 EXPLICIT_TEST = "test_upstream_drift"
 
 _collected_key: pytest.StashKey[Collected | None] = pytest.StashKey()
@@ -65,6 +77,14 @@ def _active(config: pytest.Config) -> bool:
     return mpat_config is not None and mpat_config.declared
 
 
+def _only_directories_requested(config: pytest.Config) -> bool:
+    for arg in config.args:
+        path = arg.split(NODEID_SEPARATOR, 1)[0]
+        if not path or not (config.invocation_params.dir / path).is_dir():
+            return False
+    return True
+
+
 def _explicit_tests_collected(items: Sequence[pytest.Item]) -> bool:
     module = sys.modules.get(TESTING_MODULE)
     if module is None:
@@ -88,9 +108,11 @@ class MpatItem(pytest.Item):
         return lock_path(self.config.rootpath), 0, self.name
 
     def repr_failure(
-        self, excinfo: pytest.ExceptionInfo[BaseException], style: object = None
-    ) -> str:
-        return str(excinfo.value)
+        self, excinfo: pytest.ExceptionInfo[BaseException], style: TracebackStyle | None = None
+    ) -> str | TerminalRepr:
+        if isinstance(excinfo.value, AssertionError):
+            return str(excinfo.value)
+        return super().repr_failure(excinfo, style)
 
 
 class DriftItem(MpatItem):
@@ -121,11 +143,11 @@ class MpatCollector(pytest.Collector):
             ]
         items: list[pytest.Item] = [
             DriftItem.from_parent(self, name=f"{DRIFT_NAME}[{r.target}]", result=r)
-            for r in results_for(collected)
+            for r in sorted(results_for(collected), key=lambda r: r.target)
         ]
         items.extend(
             StillNeededItem.from_parent(self, name=f"{STILL_NEEDED_NAME}[{d.target}]", decl=d)
-            for d in until_for(collected)
+            for d in sorted(until_for(collected), key=lambda d: d.target)
         )
         return items
 
@@ -134,7 +156,17 @@ class MpatCollector(pytest.Collector):
 def pytest_collection_modifyitems(
     session: pytest.Session, config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    if not _active(config) or _explicit_tests_collected(items):
+    if (
+        not _active(config)
+        or not _only_directories_requested(config)
+        or _explicit_tests_collected(items)
+    ):
         return
     collector = MpatCollector.from_parent(session, name=COLLECTOR_NAME, nodeid=COLLECTOR_NAME)
-    items.extend(collector.collect())
+    if collect_one_node is None:
+        items.extend(collector.collect())
+        return
+    report = collect_one_node(collector)
+    session.ihook.pytest_collectreport(report=report)
+    if report.passed:
+        items.extend(node for node in report.result if isinstance(node, pytest.Item))
