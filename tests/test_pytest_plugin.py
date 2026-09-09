@@ -1,3 +1,4 @@
+import os
 import textwrap
 from pathlib import Path
 
@@ -23,6 +24,10 @@ def project(tmp_path: Path, until: str, *, section: str = MPAT_SECTION) -> Path:
         )
     )
     return tmp_path
+
+
+def local_test(tmp_path: Path) -> None:
+    (tmp_path / "test_local.py").write_text("def test_ok():\n    pass\n")
 
 
 def run(pytester: pytest.Pytester, *args: str) -> pytest.RunResult:
@@ -131,3 +136,117 @@ def test_marker_selection_applies_to_generated_items(pytester, upstream, monkeyp
     assert _cli.main(["lock"]) == _cli.EXIT_OK
     result = run(pytester, "-m", "mpat", "-W", "error")
     result.assert_outcomes(passed=2)
+
+
+def test_raising_until_reports_its_traceback(pytester, upstream, monkeypatch):
+    root = pytester.path
+    (root / "pyproject.toml").write_text(PYPROJECT + MPAT_SECTION)
+    (root / "app_patches.py").write_text(
+        textwrap.dedent(
+            """
+            import mpat
+
+            def boom():
+                raise RuntimeError("kaput")
+
+            @mpat.patch("fakeup.core.greet", until=mpat.Probe(boom), note="drop me")
+            def shout(original, name, punct="!"):
+                return original(name, punct).upper()
+            """
+        )
+    )
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    result = run(pytester)
+    result.assert_outcomes(failed=1, passed=1)
+    result.stdout.fnmatch_lines(['*raise RuntimeError("kaput")*', "E*RuntimeError: kaput"])
+
+
+def test_file_argument_does_not_add_generated_items(pytester, upstream, monkeypatch):
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    local_test(root)
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    result = run(pytester, "test_local.py")
+    result.assert_outcomes(passed=1)
+    result.stdout.no_fnmatch_line("*mpat::*")
+
+
+def test_nodeid_argument_does_not_add_generated_items(pytester, upstream, monkeypatch):
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    local_test(root)
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    result = run(pytester, "test_local.py::test_ok")
+    result.assert_outcomes(passed=1)
+    result.stdout.no_fnmatch_line("*mpat::*")
+
+
+def test_directory_argument_adds_generated_items(pytester, upstream, monkeypatch):
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    local_test(root)
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    result = run(pytester, ".")
+    result.assert_outcomes(passed=3)
+
+
+def test_generated_items_are_counted_and_listed(pytester, upstream, monkeypatch):
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    local_test(root)
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    result = run(pytester, "--collect-only")
+    result.stdout.fnmatch_lines(
+        [
+            "collected 3 items",
+            "*<MpatCollector mpat>*",
+            "*<DriftItem drift[[]fakeup.core.greet[]]>*",
+            "*<StillNeededItem still-needed[[]fakeup.core.greet[]]>*",
+        ]
+    )
+
+
+def run_with_workers(
+    pytester: pytest.Pytester, upstream, monkeypatch, *args: str
+) -> pytest.RunResult:
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(root), str(upstream.root)]))
+    return pytester.runpytest_subprocess("-p", "no:cacheprovider", *args)
+
+
+def test_xdist_workers_collect_the_same_generated_items(pytester, upstream, monkeypatch):
+    result = run_with_workers(pytester, upstream, monkeypatch, "-n", "2")
+    result.assert_outcomes(passed=2)
+    result.stdout.fnmatch_lines(["*2 workers [[]2 items[]]*"])
+    result.stdout.no_fnmatch_line("*Different tests were collected*")
+
+
+def test_xdist_loadfile_runs_the_generated_items(pytester, upstream, monkeypatch):
+    result = run_with_workers(pytester, upstream, monkeypatch, "-n", "2", "--dist", "loadfile")
+    result.assert_outcomes(passed=2)
+    result.stdout.fnmatch_lines(["*2 workers [[]2 items[]]*"])
+    result.stdout.no_fnmatch_line("*Different tests were collected*")
+
+
+def test_items_still_run_without_the_private_collect_helper(pytester, upstream, monkeypatch):
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    (root / "hide_collect_one_node.py").write_text(
+        "import _pytest.runner\n\ndel _pytest.runner.collect_one_node\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(root), str(upstream.root)]))
+    result = pytester.runpytest_subprocess(
+        "-p", "no:cacheprovider", "-p", "hide_collect_one_node", "-v"
+    )
+    result.assert_outcomes(passed=2)
+    result.stdout.fnmatch_lines(
+        [
+            "*collected 0 items",
+            "mpat::drift[[]fakeup.core.greet[]] PASSED*",
+            "mpat::still-needed[[]fakeup.core.greet[]] PASSED*",
+        ]
+    )

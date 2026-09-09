@@ -178,11 +178,17 @@ mpat::still-needed[somelib.client.Client.request] PASSED
 ```
 
 One `drift` item per declared or locked target, one `still-needed` item per
-patch with `until`. Disable the set with `--no-mpat`, or `mpat = false` under
-`[tool.pytest.ini_options]`. A project with `[tool.mpat]` and an empty `modules`
-gets a single failing `mpat::unconfigured` item rather than a green run, so a
-typo in the module list cannot turn the safety net green. A project with no
-`[tool.mpat]` at all collects nothing.
+patch with `until`. They belong to no file of yours, so they are collected by
+`pytest` and by `pytest <dir>`, and left out when you name a file or a nodeid:
+`pytest tests/test_client.py` runs what you asked for and nothing else. Disable
+them everywhere with `--no-mpat`, or `mpat = false` under
+`[tool.pytest.ini_options]`. `pytest-xdist` works: the items are ordered by
+target, so every worker collects the same list.
+
+A project with `[tool.mpat]` and an empty `modules` gets a single failing
+`mpat::unconfigured` item rather than a green run, so a typo in the module list
+cannot turn the safety net green. A project with no `[tool.mpat]` at all collects
+nothing.
 
 The explicit form still works and wins when both are present:
 

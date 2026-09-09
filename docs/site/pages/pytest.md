@@ -20,6 +20,28 @@ Disable the whole set with `--no-mpat`, or permanently:
 mpat = false
 ```
 
+## When they are collected
+
+Because the items belong to no file, an argument that names one cannot select
+them, and inventing a rule for that would mean `pytest tests/test_client.py`
+quietly running work you did not ask for. So the plugin looks at the arguments:
+
+| Invocation | Generated items |
+| --- | --- |
+| `pytest` | collected |
+| `pytest tests/` (any directory) | collected |
+| `pytest tests/test_client.py` | left out |
+| `pytest tests/test_client.py::test_retry` | left out |
+| `pytest --no-mpat` | left out |
+
+Directories include the ones `testpaths` supplies, so a project with
+`testpaths = ["tests"]` gets them from a bare `pytest`. CI and a bare local
+`pytest` are covered; running one file while you work on it stays fast.
+
+`pytest-xdist` works under both `--dist load` and `--dist loadfile`. The items
+are ordered by target rather than by the order your patch modules happen to
+import, so every worker collects the same list.
+
 ## `drift[...]`
 
 One item per declared target, per `depends_on` entry, and per lockfile entry that
