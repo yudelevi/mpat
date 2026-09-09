@@ -43,7 +43,7 @@ def collect(start: Path | None = None) -> Collected | None:
         return None
     path = lock_path(config.root)
     return Collected(
-        declarations=collect_declarations(config.modules),
+        declarations=collect_declarations(config.modules, apply=True),
         lock=read_lock(path) if path.is_file() else Lock(entries={}),
         root=config.root,
     )

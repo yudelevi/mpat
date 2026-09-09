@@ -66,12 +66,25 @@ def collect_mode() -> bool:
     return os.environ.get(COLLECT_ENV) == ENV_ON
 
 
-def collect_declarations(modules: Sequence[str]) -> list[Declaration]:
+def _import_all(modules: Sequence[str]) -> None:
+    for name in modules:
+        importlib.import_module(name)
+
+
+def collect_declarations(modules: Sequence[str], *, apply: bool) -> list[Declaration]:
+    """Import the patch modules and return what they declared.
+
+    apply=True imports them the way the application does, so the patches take
+    effect and a module cached by this import is the patched one. apply=False is
+    for the CLI, which runs in its own process and must not touch live objects.
+    """
+    if apply:
+        _import_all(modules)
+        return declarations()
     previous = os.environ.get(COLLECT_ENV)
     os.environ[COLLECT_ENV] = ENV_ON
     try:
-        for name in modules:
-            importlib.import_module(name)
+        _import_all(modules)
     finally:
         if previous is None:
             del os.environ[COLLECT_ENV]

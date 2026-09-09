@@ -55,7 +55,23 @@ def test_collect_declarations_imports_under_collect(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "collect_probe", mod)
     monkeypatch.setattr("importlib.import_module", lambda name: (body(), mod)[1])
-    result = reg.collect_declarations(["collect_probe"])
+    result = reg.collect_declarations(["collect_probe"], apply=False)
     assert seen["collect"] == "1"
     assert os.environ.get(reg.COLLECT_ENV) is None
     assert [d.target for d in result] == ["p.q"]
+
+
+def test_collect_declarations_applies_without_collect_env(monkeypatch):
+    seen = {}
+    mod = types.ModuleType("apply_probe")
+    mod.__file__ = "/apply_probe.py"
+
+    def body():
+        seen["collect"] = os.environ.get(reg.COLLECT_ENV)
+        reg.register(decl(target="p.r", identity=("/apply_probe.py", "h")))
+
+    monkeypatch.setitem(sys.modules, "apply_probe", mod)
+    monkeypatch.setattr("importlib.import_module", lambda name: (body(), mod)[1])
+    result = reg.collect_declarations(["apply_probe"], apply=True)
+    assert seen["collect"] is None
+    assert [d.target for d in result] == ["p.r"]
