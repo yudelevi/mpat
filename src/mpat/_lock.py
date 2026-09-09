@@ -107,7 +107,11 @@ def _typed(target: str, data: dict[str, Any], name: str, expected: type) -> None
         )
 
 
-def _validate_entry(target: str, data: dict[str, Any]) -> None:
+def _validate_entry(target: str, data: Any) -> None:
+    if not isinstance(data, dict):
+        raise LockError(
+            f"{LOCK_FILENAME}: entry {target!r} must be a table, got {type(data).__name__}"
+        )
     for name in _REQUIRED_STR_FIELDS:
         if name not in data:
             raise LockError(f"{LOCK_FILENAME}: entry {target!r}: missing {name}")
@@ -120,7 +124,7 @@ def _validate_entry(target: str, data: dict[str, Any]) -> None:
             _typed(target, data, name, bool)
 
 
-def _entry_from_dict(target: str, data: dict[str, Any]) -> LockEntry:
+def _entry_from_dict(target: str, data: Any) -> LockEntry:
     _validate_entry(target, data)
     try:
         fp_kwargs = {name: data[name] for name in _FINGERPRINT_FIELDS if name in data}
@@ -178,14 +182,19 @@ def write_lock(path: Path, lock: Lock) -> None:
 
 
 def expand(declarations: Sequence[Declaration]) -> list[Wanted]:
-    wanted: list[Wanted] = []
+    primary = {decl.target for decl in declarations}
+    wanted: dict[str, Wanted] = {}
     for decl in declarations:
-        wanted.append(Wanted(target=decl.target, role=decl.role, parent=None, decl=decl))
-        wanted.extend(
-            Wanted(target=dep, role=ROLE_DEPENDS, parent=decl.target, decl=decl)
-            for dep in decl.depends_on
+        wanted.setdefault(
+            decl.target, Wanted(target=decl.target, role=decl.role, parent=None, decl=decl)
         )
-    return wanted
+        for dep in decl.depends_on:
+            if dep in primary:
+                continue
+            wanted.setdefault(
+                dep, Wanted(target=dep, role=ROLE_DEPENDS, parent=decl.target, decl=decl)
+            )
+    return list(wanted.values())
 
 
 def _declared_in(decl: Declaration, root: Path) -> str:

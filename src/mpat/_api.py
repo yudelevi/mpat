@@ -78,7 +78,7 @@ def _check_declaration_forbidden(canonical: str, depends_on: Sequence[str]) -> N
     allow = _allow()
     check_forbidden(canonical, allow=allow)
     for dep in depends_on:
-        check_forbidden(dep, allow=allow)
+        check_forbidden(canonical_target(dep), allow=allow)
 
 
 def _drift_status(decl: Declaration, resolved: Resolved) -> str:

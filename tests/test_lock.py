@@ -294,3 +294,59 @@ def test_parent_change_reports_unlocked(upstream, tmp_path):
     assert statuses(_lock.check(now, locked, root=root, today=TODAY))["fakeup.LIMIT"] == (
         _lock.UNLOCKED
     )
+
+
+def test_read_rejects_non_table_entry(tmp_path):
+    path = tmp_path / "mpat.lock"
+    path.write_text('version = 1\n\n[entry]\n"a.b" = 5\n')
+    with pytest.raises(LockError, match="must be a table"):
+        _lock.read_lock(path)
+
+
+def test_expand_prefers_primary_role_over_depends_on():
+    wanted = _lock.expand(
+        [decl("a.b", depends_on=["a.c"]), decl("a.c", role=ROLE_WATCH)],
+    )
+    assert [(w.target, w.role, w.parent) for w in wanted] == [
+        ("a.b", ROLE_PATCH, None),
+        ("a.c", ROLE_WATCH, None),
+    ]
+
+
+def test_expand_keeps_first_parent_for_a_shared_dependency():
+    wanted = _lock.expand([decl("a.b", depends_on=["a.z"]), decl("a.c", depends_on=["a.z"])])
+    assert [(w.target, w.role, w.parent) for w in wanted] == [
+        ("a.b", ROLE_PATCH, None),
+        ("a.z", ROLE_DEPENDS, "a.b"),
+        ("a.c", ROLE_PATCH, None),
+    ]
+
+
+def test_dependency_that_is_also_watched_locks_and_checks_once(upstream, tmp_path):
+    root = project(tmp_path)
+    decls = [
+        decl("fakeup.core.greet", depends_on=["fakeup.LIMIT"]),
+        decl("fakeup.LIMIT", role=ROLE_WATCH),
+    ]
+    lock = _lock.build_lock(decls, root=root)
+    assert lock.entries["fakeup.LIMIT"].role == ROLE_WATCH
+    assert lock.entries["fakeup.LIMIT"].parent is None
+    results = [
+        r for r in _lock.check(decls, lock, root=root, today=TODAY) if r.target.endswith("LIMIT")
+    ]
+    assert len(results) == 1
+    assert (results[0].status, results[0].role) == (fp.OK, ROLE_WATCH)
+
+
+def test_shared_dependency_locks_and_checks_once(upstream, tmp_path):
+    root = project(tmp_path)
+    decls = [
+        decl("fakeup.core.greet", depends_on=["fakeup.LIMIT"]),
+        decl("fakeup.core.agreet", depends_on=["fakeup.LIMIT"]),
+    ]
+    lock = _lock.build_lock(decls, root=root)
+    results = [
+        r for r in _lock.check(decls, lock, root=root, today=TODAY) if r.target.endswith("LIMIT")
+    ]
+    assert len(results) == 1
+    assert (results[0].status, results[0].role) == (fp.OK, ROLE_DEPENDS)
