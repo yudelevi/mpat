@@ -1,0 +1,65 @@
+site_name: mpat
+site_url: https://monkeypat.ch
+site_description: Lockfile-based upstream drift tracking for Python monkeypatches.
+site_author: Daniel Yudelevich
+repo_url: https://github.com/yudelevi/mpat
+repo_name: yudelevi/mpat
+copyright: MIT licensed
+
+docs_dir: pages
+site_dir: ../../site-build
+
+theme:
+  name: material
+  logo: assets/mpat-mark.svg
+  favicon: assets/mpat-mark.svg
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - CLI: cli.md
+  - pytest: pytest.md
+  - Lockfile: lockfile.md
+  - FAQ: faq.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.snippets
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yudelevi/mpat
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/mpat/
