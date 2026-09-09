@@ -33,9 +33,7 @@ _ENTRY_KEY = "entry"
 _VERSION_KEY = "version"
 _FINGERPRINT_FIELDS = tuple(f.name for f in dataclasses.fields(Fingerprint))
 
-_UMASK = os.umask(0)
-os.umask(_UMASK)
-_LOCK_MODE = 0o666 & ~_UMASK
+LOCK_FILE_MODE = 0o644
 
 
 @dataclass(frozen=True)
@@ -134,7 +132,7 @@ def write_lock(path: Path, lock: Lock) -> None:
     try:
         with os.fdopen(fd, "wb") as fh:
             tomli_w.dump(payload, fh)
-        os.chmod(tmp, _LOCK_MODE)
+        os.chmod(tmp, LOCK_FILE_MODE)
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):

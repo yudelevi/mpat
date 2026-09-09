@@ -1,5 +1,5 @@
 import dataclasses
-import os
+import stat
 import warnings
 from datetime import date
 from pathlib import Path
@@ -113,10 +113,7 @@ def test_write_lock_sets_readable_permissions(tmp_path):
     lock = _lock.build_lock([], root=root)
     path = _lock.lock_path(root)
     _lock.write_lock(path, lock)
-    umask = os.umask(0)
-    os.umask(umask)
-    expected = 0o666 & ~umask
-    assert path.stat().st_mode & 0o777 == expected
+    assert stat.S_IMODE(path.stat().st_mode) == _lock.LOCK_FILE_MODE
 
 
 def statuses(results):
