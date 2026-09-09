@@ -86,3 +86,45 @@ def test_show(tmp_path, upstream, capsys):
 def test_no_pyproject_is_usage_error(tmp_path, capsys):
     assert _cli.main(["check"]) == _cli.EXIT_USAGE
     assert "pyproject.toml" in capsys.readouterr().err
+
+
+def test_lock_rewrites_unreadable_lock(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    _lock.lock_path(root).write_text("version = 99\n")
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    captured = capsys.readouterr()
+    assert "ignoring unreadable mpat.lock" in captured.err
+    assert "+ fakeup.core.greet" in captured.out
+    assert _lock.read_lock(_lock.lock_path(root)).version == _lock.LOCK_VERSION
+
+
+def test_check_still_fails_on_unreadable_lock(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    _lock.lock_path(root).write_text("version = 99\n")
+    assert _cli.main(["check"]) == _cli.EXIT_USAGE
+    assert "not supported" in capsys.readouterr().err
+
+
+def test_check_table_shows_declared_in_without_trailing_padding(
+    tmp_path, upstream, monkeypatch, capsys
+):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    _cli.main(["lock"])
+    capsys.readouterr()
+    _cli.main(["check"])
+    lines = capsys.readouterr().out.splitlines()
+    assert any("app_patches.py" in line for line in lines)
+    assert all(line == line.rstrip() for line in lines)
+
+
+def test_check_with_no_declarations(tmp_path, monkeypatch, capsys):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\nmodules = ["app_patches"]\n'
+    )
+    (tmp_path / "app_patches.py").write_text("")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    assert "no declarations found" in capsys.readouterr().out
