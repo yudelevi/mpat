@@ -1,0 +1,163 @@
+import dataclasses
+
+from mpat import _fingerprint as fp
+from mpat._targets import resolve
+
+
+def fingerprint_of(target):
+    return fp.fingerprint(resolve(target))
+
+
+def test_function_fingerprint(upstream):
+    f = fingerprint_of("fakeup.core.greet")
+    assert f.kind == fp.KIND_FUNCTION
+    assert f.resolved == "fakeup.core.greet"
+    assert f.signature == "(name, punct='!')"
+    assert f.source_hash.startswith("sha256:")
+    assert f.source_file == "fakeup/core.py"
+    assert f.is_async is False
+    assert f.no_source is False
+    assert f.dist is None
+
+
+def test_async_flag(upstream):
+    assert fingerprint_of("fakeup.core.agreet").is_async is True
+
+
+def test_formatting_does_not_change_hash(upstream):
+    before = fingerprint_of("fakeup.core.greet")
+    upstream.edit(
+        "core.py", 'return f"hi {name}{punct}"', '# comment\n\n    return   f"hi {name}{punct}"'
+    )
+    assert fingerprint_of("fakeup.core.greet").source_hash == before.source_hash
+
+
+def test_body_change_changes_hash(upstream):
+    before = fingerprint_of("fakeup.core.greet")
+    upstream.edit("core.py", 'f"hi {name}{punct}"', 'f"hello {name}{punct}"')
+    after = fingerprint_of("fakeup.core.greet")
+    assert after.source_hash != before.source_hash
+    assert fp.compare(locked=before, current=after) == fp.BODY
+
+
+def test_signature_change(upstream):
+    before = fingerprint_of("fakeup.core.greet")
+    upstream.edit("core.py", 'def greet(name, punct="!"):', 'def greet(name, punctuation="!"):')
+    upstream.edit("core.py", "{punct}", "{punctuation}")
+    after = fingerprint_of("fakeup.core.greet")
+    assert fp.compare(locked=before, current=after) == fp.SIGNATURE
+
+
+def test_sync_to_async_is_signature_drift(upstream):
+    before = fingerprint_of("fakeup.core.greet")
+    upstream.edit("core.py", "def greet(", "async def greet(")
+    assert fp.compare(locked=before, current=fingerprint_of("fakeup.core.greet")) == fp.SIGNATURE
+
+
+def test_decorator_change_changes_hash(upstream):
+    before = fingerprint_of("fakeup.core.decorated")
+    upstream.edit("core.py", '@tag("v1")', '@tag("v2")')
+    assert fingerprint_of("fakeup.core.decorated").source_hash != before.source_hash
+
+
+def test_decorated_function_hashes_definition_site(upstream):
+    f = fingerprint_of("fakeup.core.decorated")
+    assert f.resolved == "fakeup.core.decorated"
+    assert f.source_file == "fakeup/core.py"
+
+
+def test_method_and_descriptors(upstream):
+    m = fingerprint_of("fakeup.core.Store.add")
+    assert m.resolved == "fakeup.core.Store.add"
+    assert m.signature == "(self, item)"
+    s = fingerprint_of("fakeup.core.Store.double")
+    assert s.kind == fp.KIND_FUNCTION
+    assert s.signature == "(x)"
+
+
+def test_class_kind(upstream):
+    c = fingerprint_of("fakeup.core.Store")
+    assert c.kind == fp.KIND_CLASS
+    assert c.source_hash
+    upstream.edit("core.py", "limit = 3", "limit = 4")
+    assert fingerprint_of("fakeup.core.Store").source_hash != c.source_hash
+
+
+def test_scalar_attribute(upstream):
+    a = fingerprint_of("fakeup.LIMIT")
+    assert a.kind == fp.KIND_ATTRIBUTE
+    assert a.value_repr == "16"
+    assert a.resolved == "fakeup.LIMIT"
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 500")
+    assert fp.compare(locked=a, current=fingerprint_of("fakeup.LIMIT")) == fp.VALUE
+
+
+def test_unhashable_attribute(upstream):
+    a = fingerprint_of("fakeup.REGISTRY")
+    assert a.value_repr == fp.UNHASHABLE
+    assert a.source_hash is None
+
+
+def test_class_attribute_scalar(upstream):
+    assert fingerprint_of("fakeup.core.Store.limit").value_repr == "3"
+
+
+def test_property_hashes_fget(upstream):
+    p = fingerprint_of("fakeup.core.Store.size")
+    assert p.kind == fp.KIND_ATTRIBUTE
+    assert p.value_repr is None
+    assert p.source_hash
+    upstream.edit("core.py", "return len(self.items)", "return len(self.items) + 0")
+    assert fp.compare(locked=p, current=fingerprint_of("fakeup.core.Store.size")) == fp.BODY
+
+
+def test_reexport_resolves_to_definition(upstream):
+    a = fingerprint_of("fakeup.greet_alias")
+    assert a.resolved == "fakeup.core.greet"
+    assert a.source_file == "fakeup/core.py"
+
+
+def test_redirected_reexport_is_moved(upstream):
+    before = fingerprint_of("fakeup.greet_alias")
+    upstream.edit(
+        "__init__.py",
+        "from fakeup.core import greet as greet_alias",
+        "from fakeup.core import decorated as greet_alias",
+    )
+    assert fp.compare(locked=before, current=fingerprint_of("fakeup.greet_alias")) == fp.MOVED
+
+
+def test_definition_inside_try_block(upstream):
+    assert fingerprint_of("fakeup.core.guarded").source_hash
+
+
+def test_pyc_only_install_is_no_source(upstream):
+    import compileall
+
+    compileall.compile_dir(str(upstream.pkg), quiet=1, legacy=True)
+    for py in upstream.pkg.rglob("*.py"):
+        py.unlink()
+    upstream.purge()
+    f = fingerprint_of("fakeup.core.greet")
+    assert f.no_source is True
+    assert f.source_hash is None
+    assert f.signature == "(name, punct='!')"
+
+
+def test_builtin_is_no_source():
+    f = fp.fingerprint(resolve("os.path.join"))
+    assert f.kind == fp.KIND_FUNCTION
+    f2 = fp.fingerprint(resolve("math.sqrt"))
+    assert f2.no_source is True
+
+
+def test_installed_dist_metadata():
+    f = fp.fingerprint(resolve("packaging.version.Version"))
+    assert f.dist == "packaging"
+    assert f.dist_version
+    assert f.source_file == "packaging/version.py"
+
+
+def test_compare_ok_is_identity(upstream):
+    f = fingerprint_of("fakeup.core.greet")
+    assert fp.compare(locked=f, current=dataclasses.replace(f)) == fp.OK
