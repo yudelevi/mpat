@@ -391,3 +391,13 @@ def test_child_then_base_raises(upstream):
         @mpat.patch("fakeup.core.Base.go")
         def base_go(original, self):
             return original(self) + "-base"
+
+
+def test_patch_refuses_forbidden_depends_on(upstream):
+    with pytest.raises(ForbiddenTarget, match="ssl"):
+        mpat.patch("fakeup.core.greet", depends_on=["ssl.SSLContext"])
+
+
+def test_watch_refuses_forbidden_depends_on(upstream):
+    with pytest.raises(ForbiddenTarget, match="ssl"):
+        mpat.watch("fakeup.REGISTRY", depends_on=["ssl.SSLContext"])

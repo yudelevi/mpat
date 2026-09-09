@@ -74,6 +74,13 @@ def _allow() -> tuple[str, ...]:
     return config.allow if config else ()
 
 
+def _check_declaration_forbidden(canonical: str, depends_on: Sequence[str]) -> None:
+    allow = _allow()
+    check_forbidden(canonical, allow=allow)
+    for dep in depends_on:
+        check_forbidden(dep, allow=allow)
+
+
 def _drift_status(decl: Declaration, resolved: Resolved) -> str:
     lock = runtime_lock()
     if lock is None or decl.target not in lock.entries:
@@ -166,7 +173,7 @@ def patch(
     if on_drift not in ON_DRIFT_VALUES:
         raise ValueError(f"on_drift must be one of {ON_DRIFT_VALUES}, got {on_drift!r}")
     canonical = canonical_target(target)
-    check_forbidden(canonical, allow=_allow())
+    _check_declaration_forbidden(canonical, depends_on)
     resolved = resolve(canonical)
     check_supported(resolved)
     declared_in = _caller_file()
@@ -217,7 +224,7 @@ def watch(
     note: str = "",
 ) -> None:
     canonical = canonical_target(target)
-    check_forbidden(canonical, allow=_allow())
+    _check_declaration_forbidden(canonical, depends_on)
     resolved = resolve(canonical)
     declared_in = _caller_file()
     decl = Declaration(

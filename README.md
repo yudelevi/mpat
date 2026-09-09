@@ -134,6 +134,8 @@ no_source = false
 
 `role` is `patch`, `watch` or `depends_on`; a `depends_on` entry also carries
 `parent`. Entries for constants carry `value_repr` instead of a source hash.
+An entry whose `role` or `parent` no longer matches the declaration is reported
+`unlocked`: the audit trail changed meaning, so it has to be re-locked.
 
 `mpat check` reports one row per target with one of these statuses:
 
@@ -201,7 +203,8 @@ hook environment would not have them.
 without asking. It refuses a short denylist (`mpat`, `builtins`, `sys`,
 `importlib`, `ssl`, `hashlib`, `hmac`, `secrets`, `cryptography`, `certifi`)
 so nobody patches or watches those by accident; the denylist applies to both
-`patch` and `watch`. Override it with `[tool.mpat] allow`.
+`patch` and `watch`, and to every `depends_on` target they declare. Override it
+with `[tool.mpat] allow`.
 
 Only plain functions, staticmethods and classmethods can be patched.
 Properties, custom descriptors and metaclass attributes can be watched, not

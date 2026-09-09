@@ -11,7 +11,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from mpat._targets import ASYNC, Resolved, callable_kind
+from mpat._targets import ASYNC, ASYNCGEN, Resolved, callable_kind
 
 KIND_FUNCTION = "function"
 KIND_CLASS = "class"
@@ -30,6 +30,7 @@ HASH_PREFIX = "sha256:"
 SCALARS = (int, str, bool, float, type(None))
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _BLOCKS = (ast.If, ast.Try, ast.With, ast.For, ast.While)
+_ASYNC_KINDS = (ASYNC, ASYNCGEN)
 
 
 @dataclass(frozen=True)
@@ -138,18 +139,20 @@ def _dist(top: str) -> tuple[str | None, str | None]:
 def _relative_source(file: str, top: str) -> str:
     module = sys.modules.get(top)
     module_file = getattr(module, "__file__", None)
-    search_path = list(getattr(module, "__path__", []))
+    search_path = [Path(entry) for entry in getattr(module, "__path__", [])]
     if module_file:
         base = Path(module_file).parent
-        root = base.parent if search_path else base
+        roots = [base.parent] if search_path else [base]
     elif search_path:
-        root = Path(search_path[0]).parent
+        roots = [portion.parent for portion in search_path]
     else:
         return file
-    try:
-        return Path(file).relative_to(root).as_posix()
-    except ValueError:
-        return file
+    for root in roots:
+        try:
+            return Path(file).relative_to(root).as_posix()
+        except ValueError:
+            continue
+    return file
 
 
 def _signature(obj: Any) -> str | None:
@@ -187,7 +190,7 @@ def fingerprint(resolved: Resolved) -> Fingerprint:
     return Fingerprint(
         kind=kind,
         resolved=name,
-        is_async=kind == KIND_FUNCTION and callable_kind(obj) == ASYNC,
+        is_async=kind == KIND_FUNCTION and callable_kind(obj) in _ASYNC_KINDS,
         signature=_signature(obj) if kind == KIND_FUNCTION else None,
         source_hash=source_hash,
         value_repr=value_repr,

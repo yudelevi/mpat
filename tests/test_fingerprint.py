@@ -1,4 +1,5 @@
 import dataclasses
+import importlib
 
 from mpat import _fingerprint as fp
 from mpat._targets import resolve
@@ -199,3 +200,27 @@ def test_source_disappearing_is_no_source_status(upstream):
     before = fingerprint_of("fakeup.core.greet")
     after = dataclasses.replace(before, source_hash=None, no_source=True)
     assert fp.compare(locked=before, current=after) == fp.NO_SOURCE
+
+
+def test_sync_generator_to_async_generator_is_signature_drift(upstream):
+    before = fingerprint_of("fakeup.core.count")
+    assert before.is_async is False
+    upstream.edit("core.py", "def count(n):", "async def count(n):")
+    upstream.edit("core.py", "    yield from range(n)", "    for i in range(n):\n        yield i")
+    after = fingerprint_of("fakeup.core.count")
+    assert after.is_async is True
+    assert fp.compare(locked=before, current=after) == fp.SIGNATURE
+
+
+def test_namespace_package_second_portion_is_relative(tmp_path, monkeypatch):
+    first, second = tmp_path / "site_a", tmp_path / "site_b"
+    (first / "nsp2" / "one").mkdir(parents=True)
+    (second / "nsp2" / "two").mkdir(parents=True)
+    (first / "nsp2" / "one" / "__init__.py").write_text("def hello():\n    return 1\n")
+    (second / "nsp2" / "two" / "__init__.py").write_text("def hello():\n    return 2\n")
+    monkeypatch.syspath_prepend(str(second))
+    monkeypatch.syspath_prepend(str(first))
+    nsp2 = importlib.import_module("nsp2")
+    assert len(list(nsp2.__path__)) == 2
+    assert fingerprint_of("nsp2.two.hello").source_file == "nsp2/two/__init__.py"
+    assert fingerprint_of("nsp2.one.hello").source_file == "nsp2/one/__init__.py"

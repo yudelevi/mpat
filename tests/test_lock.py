@@ -235,3 +235,62 @@ def test_entry_roundtrip_drops_none_fields(tmp_path):
     _lock.write_lock(path, lock)
     assert "signature" not in path.read_text()
     assert _lock.read_lock(path).entries["a.b"] == dataclasses.replace(entry)
+
+
+def write_entry(path: Path, **overrides) -> None:
+    fields = {
+        "role": '"patch"',
+        "declared_in": '"p.py"',
+        "kind": '"function"',
+        "resolved": '"a.b"',
+        **overrides,
+    }
+    body = "\n".join(f"{k} = {v}" for k, v in fields.items())
+    path.write_text(f'version = 1\n\n[entry."a.b"]\n{body}\n')
+
+
+def test_read_rejects_non_string_role(tmp_path):
+    path = tmp_path / "mpat.lock"
+    write_entry(path, role="[]")
+    with pytest.raises(LockError, match="role"):
+        _lock.read_lock(path)
+
+
+def test_read_rejects_non_bool_is_async(tmp_path):
+    path = tmp_path / "mpat.lock"
+    write_entry(path, is_async='"yes"')
+    with pytest.raises(LockError, match="is_async"):
+        _lock.read_lock(path)
+
+
+def test_read_rejects_non_string_optional_field(tmp_path):
+    path = tmp_path / "mpat.lock"
+    write_entry(path, signature="12")
+    with pytest.raises(LockError, match="signature"):
+        _lock.read_lock(path)
+
+
+def test_read_accepts_a_well_typed_entry(tmp_path):
+    path = tmp_path / "mpat.lock"
+    write_entry(path, is_async="true", signature='"(x)"')
+    entry = _lock.read_lock(path).entries["a.b"]
+    assert entry.fingerprint.is_async is True
+    assert entry.fingerprint.signature == "(x)"
+
+
+def test_role_change_reports_unlocked(upstream, tmp_path):
+    root = project(tmp_path)
+    locked = _lock.build_lock([decl("fakeup.core.greet", role=ROLE_WATCH)], root=root)
+    now = [decl("fakeup.core.greet", role=ROLE_PATCH)]
+    assert statuses(_lock.check(now, locked, root=root, today=TODAY)) == {
+        "fakeup.core.greet": _lock.UNLOCKED
+    }
+
+
+def test_parent_change_reports_unlocked(upstream, tmp_path):
+    root = project(tmp_path)
+    locked = _lock.build_lock([decl("fakeup.core.greet", depends_on=["fakeup.LIMIT"])], root=root)
+    now = [decl("fakeup.core.agreet", depends_on=["fakeup.LIMIT"]), decl("fakeup.core.greet")]
+    assert statuses(_lock.check(now, locked, root=root, today=TODAY))["fakeup.LIMIT"] == (
+        _lock.UNLOCKED
+    )

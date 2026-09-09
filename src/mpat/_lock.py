@@ -32,6 +32,17 @@ MISSING = "missing"
 _ENTRY_KEY = "entry"
 _VERSION_KEY = "version"
 _FINGERPRINT_FIELDS = tuple(f.name for f in dataclasses.fields(Fingerprint))
+_REQUIRED_STR_FIELDS = ("role", "declared_in", "kind", "resolved")
+_OPTIONAL_STR_FIELDS = (
+    "signature",
+    "source_hash",
+    "value_repr",
+    "source_file",
+    "dist",
+    "dist_version",
+    "parent",
+)
+_BOOL_FIELDS = ("is_async", "no_source")
 
 LOCK_FILE_MODE = 0o644
 
@@ -87,7 +98,30 @@ def _entry_to_dict(entry: LockEntry) -> dict[str, Any]:
     return data
 
 
+def _typed(target: str, data: dict[str, Any], name: str, expected: type) -> None:
+    value = data[name]
+    if type(value) is not expected:
+        raise LockError(
+            f"{LOCK_FILENAME}: entry {target!r}: {name} must be "
+            f"{expected.__name__}, got {type(value).__name__}"
+        )
+
+
+def _validate_entry(target: str, data: dict[str, Any]) -> None:
+    for name in _REQUIRED_STR_FIELDS:
+        if name not in data:
+            raise LockError(f"{LOCK_FILENAME}: entry {target!r}: missing {name}")
+        _typed(target, data, name, str)
+    for name in _OPTIONAL_STR_FIELDS:
+        if name in data:
+            _typed(target, data, name, str)
+    for name in _BOOL_FIELDS:
+        if name in data:
+            _typed(target, data, name, bool)
+
+
 def _entry_from_dict(target: str, data: dict[str, Any]) -> LockEntry:
+    _validate_entry(target, data)
     try:
         fp_kwargs = {name: data[name] for name in _FINGERPRINT_FIELDS if name in data}
         return LockEntry(
@@ -133,6 +167,8 @@ def write_lock(path: Path, lock: Lock) -> None:
     try:
         with os.fdopen(fd, "wb") as fh:
             tomli_w.dump(payload, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
         os.chmod(tmp, LOCK_FILE_MODE)
         os.replace(tmp, path)
     except BaseException:
@@ -199,6 +235,8 @@ def check(
         declared_in = _declared_in(w.decl, root)
         entry = lock.entries.get(w.target)
         current = _current(w.target)
+        if entry is not None and (entry.role != w.role or entry.parent != w.parent):
+            entry = None
         if entry is None:
             results.append(
                 CheckResult(
