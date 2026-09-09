@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from mpat import _cli
+from tests.conftest import forget_patch_module
 
 PYPROJECT = '[project]\nname = "x"\n'
 MPAT_SECTION = '[tool.mpat]\nmodules = ["app_patches"]\n'
@@ -250,3 +251,23 @@ def test_items_still_run_without_the_private_collect_helper(pytester, upstream, 
             "mpat::still-needed[[]fakeup.core.greet[]] PASSED*",
         ]
     )
+
+
+def test_collection_applies_the_patches_for_later_tests(pytester, upstream, monkeypatch):
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    (root / "test_patched_behaviour.py").write_text(
+        textwrap.dedent(
+            """
+            import fakeup.core
+
+
+            def test_patch_is_active():
+                assert fakeup.core.greet("world") == "HI WORLD!"
+            """
+        )
+    )
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    forget_patch_module(upstream)
+    result = run(pytester, "-v")
+    result.assert_outcomes(passed=3)

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from mpat import _cli
+from tests.conftest import forget_patch_module
 
 
 def project(tmp_path: Path, until: str) -> Path:
@@ -57,3 +58,25 @@ def test_unconfigured_project_fails_loudly(pytester):
     result = pytester.runpytest("test_generated.py", "-p", "no:cacheprovider")
     result.assert_outcomes(failed=1, skipped=1)
     result.stdout.fnmatch_lines(["*no [[]tool.mpat[]] modules found*"])
+
+
+def test_generated_module_leaves_patches_applied(pytester, upstream, monkeypatch):
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    (root / "test_patched_behaviour.py").write_text(
+        textwrap.dedent(
+            """
+            import fakeup.core
+
+
+            def test_patch_is_active():
+                assert fakeup.core.greet("world") == "HI WORLD!"
+            """
+        )
+    )
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    forget_patch_module(upstream)
+    result = pytester.runpytest("-p", "no:cacheprovider", "-v")
+    result.assert_outcomes(passed=3)
+    result.stdout.fnmatch_lines(["test_generated.py::test_upstream_drift*PASSED*"])
+    result.stdout.no_fnmatch_line("*mpat::drift*")

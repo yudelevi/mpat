@@ -12,6 +12,7 @@ pytest_plugins = ["pytester"]
 
 FIXTURE_ROOT = Path(__file__).parent / "fake_upstream"
 PKG = "fakeup"
+PATCH_MODULE = "app_patches"
 
 
 class Upstream:
@@ -33,6 +34,12 @@ class Upstream:
         assert old in text, f"{old!r} not in {rel}"
         path.write_text(text.replace(old, new))
         self.purge()
+
+
+def forget_patch_module(upstream: Upstream) -> None:
+    """Undo an in-process `mpat lock`, which the real CLI does in its own process."""
+    sys.modules.pop(PATCH_MODULE, None)
+    upstream.purge()
 
 
 @pytest.fixture

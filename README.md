@@ -185,6 +185,9 @@ them everywhere with `--no-mpat`, or `mpat = false` under
 `[tool.pytest.ini_options]`. `pytest-xdist` works: the items are ordered by
 target, so every worker collects the same list.
 
+Collecting them imports your patch modules the way your application does, so the
+patches are active for the rest of the test session exactly as in production.
+
 A project with `[tool.mpat]` and an empty `modules` gets a single failing
 `mpat::unconfigured` item rather than a green run, so a typo in the module list
 cannot turn the safety net green. A project with no `[tool.mpat]` at all collects

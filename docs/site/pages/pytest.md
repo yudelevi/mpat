@@ -114,9 +114,12 @@ for result in drift_results():
 `drift_results()` returns the same `CheckResult` objects behind `mpat check`.
 `until_declarations()` returns the declarations that have an `until`.
 
-Both read your patch modules, which means they are imported with
-`MPAT_COLLECT=1` at collection time. Nothing is patched by the import, and the
-plugin imports them once per session.
+Both read your patch modules, which means your patch modules are imported at
+collection time, once per session. They are imported normally, not in the
+collect-only mode `mpat check` uses, so the patches apply and stay applied for
+the rest of the session. That is deliberate: a module imported with its patches
+suppressed would be cached that way, and every later test expecting patched
+behaviour would see pristine upstream instead.
 
 ## pre-commit
 
