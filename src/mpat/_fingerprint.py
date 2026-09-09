@@ -24,6 +24,7 @@ MOVED = "moved"
 SIGNATURE = "signature"
 BODY = "body"
 VALUE = "value"
+NO_SOURCE = "no_source"
 
 HASH_PREFIX = "sha256:"
 SCALARS = (int, str, bool, float, type(None))
@@ -137,10 +138,14 @@ def _dist(top: str) -> tuple[str | None, str | None]:
 def _relative_source(file: str, top: str) -> str:
     module = sys.modules.get(top)
     module_file = getattr(module, "__file__", None)
-    if not module_file:
+    search_path = list(getattr(module, "__path__", []))
+    if module_file:
+        base = Path(module_file).parent
+        root = base.parent if search_path else base
+    elif search_path:
+        root = Path(search_path[0]).parent
+    else:
         return file
-    base = Path(module_file).parent
-    root = base.parent if hasattr(module, "__path__") else base
     try:
         return Path(file).relative_to(root).as_posix()
     except ValueError:
@@ -196,12 +201,16 @@ def fingerprint(resolved: Resolved) -> Fingerprint:
 def compare(*, locked: Fingerprint, current: Fingerprint) -> str:
     if locked.resolved != current.resolved:
         return MOVED
+    if locked.kind != current.kind:
+        return MOVED
     if locked.source_file and current.source_file and locked.source_file != current.source_file:
         return MOVED
     if locked.signature != current.signature or locked.is_async != current.is_async:
         return SIGNATURE
     if locked.value_repr != current.value_repr:
         return VALUE
+    if locked.source_hash is not None and current.source_hash is None:
+        return NO_SOURCE
     if locked.source_hash != current.source_hash:
         return BODY
     return OK

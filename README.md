@@ -141,6 +141,7 @@ no_source = false
 | `signature` | The signature changed, or the target switched between sync and async. |
 | `body` | The source hash changed. |
 | `value` | A watched constant's value changed. |
+| `no_source` | The locked source is no longer readable, so only the signature is still comparable. |
 | `missing` | The target no longer exists upstream. |
 | `unlocked` | Declared in code but absent from `mpat.lock`. |
 | `stale` | In `mpat.lock` but no longer declared in code. |
@@ -148,6 +149,12 @@ no_source = false
 
 Drift beats `review`: a target that both drifted and is overdue reports the
 drift.
+
+Some targets have no readable source: builtins, compiled extensions, and
+`.pyc`-only installs. Those are locked with `no_source = true` and compared on
+signature and async-ness alone, never on a body hash. `mpat lock` warns once per
+such entry and `mpat check` marks its row `[signature-only]`, because that is a
+much weaker guard than the rest of the table.
 
 Run `mpat check` on dependency-bump MRs. When it fails, read the upstream
 change, fix or delete the patch, run `mpat lock`, commit.

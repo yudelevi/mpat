@@ -38,6 +38,8 @@ _ROLE_WIDTH = 10
 _JSON_INDENT = 2
 
 _NO_DECLARATIONS = "no declarations found"
+_NO_SOURCE_MARKER = " [signature-only]"
+_NO_SOURCE_NOTICE = "no source available, only the signature is locked"
 
 
 def _require_config() -> Config:
@@ -80,10 +82,18 @@ def cmd_lock(_: argparse.Namespace) -> int:
     _print_lock_diff(_lock_to_replace(config.root), new)
     write_lock(lock_path(config.root), new)
     print(f"wrote {LOCK_FILENAME} with {len(new.entries)} entries")
+    for target in sorted(new.entries):
+        if new.entries[target].fingerprint.no_source:
+            print(f"mpat: {target}: {_NO_SOURCE_NOTICE}", file=sys.stderr)
     return EXIT_OK
 
 
+def _status_cell(result: CheckResult) -> str:
+    return result.status + (_NO_SOURCE_MARKER if result.no_source else "")
+
+
 def _print_table(results: Sequence[CheckResult]) -> None:
+    status_width = max([_STATUS_WIDTH, *(len(_status_cell(r)) for r in results)])
     target_width = max((len(r.target) for r in results), default=0)
     source_width = max((len(r.declared_in) for r in results), default=0)
     for r in results:
@@ -92,7 +102,7 @@ def _print_table(results: Sequence[CheckResult]) -> None:
             versions = f" {r.locked_version} -> {r.current_version}"
         note = f"  {r.note}" if r.note else ""
         row = (
-            f"{r.status:<{_STATUS_WIDTH}} {r.role:<{_ROLE_WIDTH}} "
+            f"{_status_cell(r):<{status_width}} {r.role:<{_ROLE_WIDTH}} "
             f"{r.target:<{target_width}} {r.declared_in:<{source_width}}{versions}{note}"
         )
         print(row.rstrip())

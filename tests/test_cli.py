@@ -128,3 +128,36 @@ def test_check_with_no_declarations(tmp_path, monkeypatch, capsys):
     monkeypatch.syspath_prepend(str(tmp_path))
     assert _cli.main(["check"]) == _cli.EXIT_OK
     assert "no declarations found" in capsys.readouterr().out
+
+
+def no_source_project(tmp_path: Path) -> Path:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\nmodules = ["app_patches"]\n'
+    )
+    (tmp_path / "app_patches.py").write_text('import mpat\n\nmpat.watch("math.sqrt")\n')
+    return tmp_path
+
+
+def test_lock_warns_once_per_no_source_entry(tmp_path, monkeypatch, capsys):
+    root = no_source_project(tmp_path)
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    err = capsys.readouterr().err
+    assert err.count("math.sqrt: no source available, only the signature is locked") == 1
+
+
+def test_check_marks_no_source_rows(tmp_path, monkeypatch, capsys):
+    root = no_source_project(tmp_path)
+    monkeypatch.syspath_prepend(str(root))
+    _cli.main(["lock"])
+    capsys.readouterr()
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    assert "[signature-only]" in capsys.readouterr().out
+
+
+def test_show_no_source_target(tmp_path, capsys):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n')
+    assert _cli.main(["show", "math.sqrt"]) == _cli.EXIT_OK
+    out = capsys.readouterr().out
+    assert "no_source: True" in out
+    assert "(no source available)" in out

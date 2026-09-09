@@ -172,3 +172,30 @@ def test_installed_dist_metadata():
 def test_compare_ok_is_identity(upstream):
     f = fingerprint_of("fakeup.core.greet")
     assert fp.compare(locked=f, current=dataclasses.replace(f)) == fp.OK
+
+
+def test_namespace_package_source_is_relative(tmp_path, monkeypatch):
+    site = tmp_path / "nssite"
+    sub = site / "nsp" / "sub"
+    sub.mkdir(parents=True)
+    (sub / "__init__.py").write_text("def hello():\n    return 1\n")
+    monkeypatch.syspath_prepend(str(site))
+    f = fingerprint_of("nsp.sub.hello")
+    assert f.source_file == "nsp/sub/__init__.py"
+    assert f.source_hash
+
+
+def test_function_replaced_by_class_is_moved(upstream):
+    before = fingerprint_of("fakeup.core.greet")
+    upstream.edit(
+        "core.py", 'def greet(name, punct="!"):', "class greet:\n    x = 1\n\ndef _unused():"
+    )
+    after = fingerprint_of("fakeup.core.greet")
+    assert after.kind == fp.KIND_CLASS
+    assert fp.compare(locked=before, current=after) == fp.MOVED
+
+
+def test_source_disappearing_is_no_source_status(upstream):
+    before = fingerprint_of("fakeup.core.greet")
+    after = dataclasses.replace(before, source_hash=None, no_source=True)
+    assert fp.compare(locked=before, current=after) == fp.NO_SOURCE
