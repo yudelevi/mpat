@@ -169,7 +169,10 @@ change, fix or delete the patch, run `mpat lock`, commit.
 from mpat.testing import test_upstream_drift, test_patch_still_needed
 ```
 
-One test per declared or locked target, one per patch with `until`.
+One test per declared or locked target, one per patch with `until`. If the
+project has no `pyproject.toml` or an empty `[tool.mpat] modules`,
+`test_upstream_drift` fails with that message rather than skipping, so a typo in
+the module list cannot turn the safety net green.
 
 ## pre-commit
 

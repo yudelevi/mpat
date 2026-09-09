@@ -16,6 +16,11 @@ from mpat._fingerprint import OK
 from mpat._lock import CheckResult, Lock, check, lock_path, read_lock
 from mpat._registry import Declaration, collect_declarations
 
+UNCONFIGURED_TARGET = "<unconfigured>"
+UNCONFIGURED_ROLE = "config"
+UNCONFIGURED_STATUS = "unconfigured"
+UNCONFIGURED_NOTE = "no [tool.mpat] modules found; add modules to pyproject.toml"
+
 
 @dataclass(frozen=True)
 class Collected:
@@ -39,7 +44,14 @@ def _collected() -> Collected | None:
 def drift_results() -> list[CheckResult]:
     collected = _collected()
     if collected is None:
-        return []
+        return [
+            CheckResult(
+                target=UNCONFIGURED_TARGET,
+                role=UNCONFIGURED_ROLE,
+                status=UNCONFIGURED_STATUS,
+                note=UNCONFIGURED_NOTE,
+            )
+        ]
     return check(collected.declarations, collected.lock, root=collected.root, today=date.today())
 
 

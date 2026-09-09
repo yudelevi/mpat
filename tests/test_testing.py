@@ -49,10 +49,11 @@ def test_generated_tests_fail_on_drift_and_fixed_upstream(pytester, upstream, mo
     result.stdout.fnmatch_lines(["*body*drop me*", "*upstream fixed*drop me*"])
 
 
-def test_no_declarations_means_no_tests(pytester):
+def test_unconfigured_project_fails_loudly(pytester):
     (pytester.path / "pyproject.toml").write_text('[project]\nname = "x"\n')
     (pytester.path / "test_generated.py").write_text(
         "from mpat.testing import test_upstream_drift, test_patch_still_needed\n"
     )
     result = pytester.runpytest("test_generated.py", "-p", "no:cacheprovider")
-    result.assert_outcomes(skipped=2)
+    result.assert_outcomes(failed=1, skipped=1)
+    result.stdout.fnmatch_lines(["*no [[]tool.mpat[]] modules found*"])
