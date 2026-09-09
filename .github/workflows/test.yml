@@ -9,12 +9,21 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync
-      - run: uv run pytest
-      - run: uv run ruff check src tests
-      - run: uv run ruff format --check src tests
-      - run: uv run ty check src tests
-      - run: uv build
+      - run: uv python install ${{ matrix.python }}
+      - run: uv sync --python ${{ matrix.python }}
+      - run: uv run --python ${{ matrix.python }} pytest
+      - if: matrix.python == '3.13'
+        run: uv run ruff check src tests
+      - if: matrix.python == '3.13'
+        run: uv run ruff format --check src tests
+      - if: matrix.python == '3.13'
+        run: uv run ty check src tests
+      - if: matrix.python == '3.13'
+        run: uv build
