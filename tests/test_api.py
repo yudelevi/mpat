@@ -293,7 +293,7 @@ def test_watch_unsupported_targets_are_fine(upstream):
 
 
 def test_public_surface():
-    assert {"patch", "watch", "Version", "Probe", "Until"} <= set(mpat.__all__)
+    assert {"patch", "watch", "apply_all", "Version", "Probe", "Until"} <= set(mpat.__all__)
 
 
 def test_inherited_method_patchable_on_sibling_subclasses(upstream):

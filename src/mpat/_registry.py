@@ -13,6 +13,7 @@ ROLE_WATCH = "watch"
 ROLE_DEPENDS = "depends_on"
 
 STATUS_REGISTERED = "registered"
+STATUS_DEFERRED = "deferred"
 STATUS_APPLIED = "applied"
 STATUS_SKIPPED_UNTIL = "skipped_until"
 STATUS_SKIPPED_DRIFT = "skipped_drift"

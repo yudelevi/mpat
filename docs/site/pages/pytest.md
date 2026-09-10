@@ -119,7 +119,9 @@ collection time, once per session. They are imported normally, not in the
 collect-only mode `mpat check` uses, so the patches apply and stay applied for
 the rest of the session. That is deliberate: a module imported with its patches
 suppressed would be cached that way, and every later test expecting patched
-behaviour would see pristine upstream instead.
+behaviour would see pristine upstream instead. A `when_imported=True` patch is
+applied during collection too, because fingerprinting its target imports the
+module the patch is waiting on.
 
 ## pre-commit
 

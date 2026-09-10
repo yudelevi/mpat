@@ -180,7 +180,8 @@ $ echo $?
 modules. In that mode `patch()` and `watch()` register the declaration and return
 immediately: nothing is patched, no drift is compared, no `until` is evaluated. So
 the CLI can read your declarations without changing the behaviour of the process
-it runs in.
+it runs in. A `when_imported=True` patch registers no import hook in this mode
+either; the CLI imports its target directly when it fingerprints it.
 
 The variable is restored to its previous value afterwards. You do not normally set
 it yourself. Set it if you need to import a patch module for inspection without

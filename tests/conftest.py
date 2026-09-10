@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from mpat import _config, _fingerprint, _lock, _registry
+from mpat import _config, _fingerprint, _hooks, _lock, _registry
 
 pytest_plugins = ["pytester"]
 
@@ -59,11 +59,13 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.delenv("MPAT_COLLECT", raising=False)
     monkeypatch.delenv("MPAT_STRICT", raising=False)
     _registry.reset()
+    _hooks.reset()
     _config.reset_caches()
     _fingerprint.reset_caches()
     _lock.reset_caches()
     yield
     _registry.reset()
+    _hooks.reset()
     _config.reset_caches()
     _fingerprint.reset_caches()
     _lock.reset_caches()
