@@ -28,6 +28,13 @@
   existing attribute of exactly the value's type, `bool` and `int` included.
   Each override is locked as a watch with `track_value = false`, so `mpat check`
   is green whether or not the override was applied in that process.
+- `watch()` accepts `until`, the same `Version`, `Probe`, `|` and `&` as
+  `patch`. A watch applies nothing, so the condition has no runtime effect; it
+  gives the workaround a generated `still-needed[<target>]` test, which is what
+  a per-instance `setattr` wrapper or an attribute-creation shim needed instead
+  of a hand-written one. `[[tool.mpat.watch]]` entries take `until` as a
+  string: a requirement with a version specifier, or a dotted path to a
+  zero-argument callable that is imported when first evaluated.
 
 ## 0.2.0
 

@@ -58,8 +58,8 @@ declaration's `note`. See [the status table](cli.md#statuses).
 
 ## `still-needed[...]`
 
-One item per patch that has an `until`. It fails once the condition comes true,
-which is the point at which the patch should be deleted.
+One item per patch or watch that has an `until`. It fails once the condition
+comes true, which is the point at which the workaround should be deleted.
 
 ```
 FAILED mpat::still-needed[somelib.client.Client.request]
@@ -67,7 +67,9 @@ FAILED mpat::still-needed[somelib.client.Client.request]
     Works around somelib#123.
 ```
 
-Patches with no `until` produce no item here.
+The message names the role, `patch` or `watch`, so a failing item for a watch
+reads `upstream fixed, delete this watch`. Declarations with no `until` produce
+no item here.
 
 ## The unconfigured case
 

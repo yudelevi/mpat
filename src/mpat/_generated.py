@@ -76,4 +76,4 @@ def drift_message(result: CheckResult) -> str:
 
 
 def still_needed_message(decl: Declaration) -> str:
-    return f"{decl.target}: upstream fixed, delete this patch. {decl.note}".rstrip()
+    return f"{decl.target}: upstream fixed, delete this {decl.role}. {decl.note}".rstrip()

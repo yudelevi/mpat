@@ -184,3 +184,16 @@ def test_override_originals_are_recorded_and_reset():
     assert reg.override_originals() == {"a.b": 1}
     reg.reset()
     assert reg.override_originals() == {}
+
+
+def test_config_watch_until_string_becomes_a_condition():
+    spec = WatchSpec(target="fakeup.LIMIT", until="packaging>9999")
+    (d,) = reg.collect_declarations(config(watches=(spec,)), apply=False)
+    assert d.until is not None
+    assert not d.until()
+
+
+def test_config_watch_invalid_until_raises_at_collect():
+    spec = WatchSpec(target="fakeup.LIMIT", until="ontospy")
+    with pytest.raises(MpatError, match="until"):
+        reg.collect_declarations(config(watches=(spec,)), apply=False)

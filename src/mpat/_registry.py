@@ -10,7 +10,7 @@ from typing import Any
 from mpat._config import PYPROJECT, Config, OverrideSpec, WatchSpec
 from mpat._errors import MpatError
 from mpat._targets import check_forbidden
-from mpat._until import Until
+from mpat._until import Until, until_from_string
 
 ROLE_PATCH = "patch"
 ROLE_WATCH = "watch"
@@ -102,7 +102,7 @@ def watch_declaration(spec: WatchSpec) -> Declaration:
         target=spec.target,
         role=ROLE_WATCH,
         depends_on=spec.depends_on,
-        until=None,
+        until=None if spec.until is None else until_from_string(spec.until),
         on_drift=ON_DRIFT_WARN,
         review_by=spec.review_by,
         note=spec.note,

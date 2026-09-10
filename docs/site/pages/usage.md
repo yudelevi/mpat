@@ -76,6 +76,7 @@ def watch(
     target: str | object,
     *,
     depends_on: Sequence[str] = (),
+    until: Until | None = None,
     review_by: date | None = None,
     note: str = "",
     track_value: bool = True,
@@ -122,9 +123,29 @@ Switching `track_value` on an already locked target reports `unlocked` from
 `mpat check` until you run `mpat lock` again, the same as changing a target's
 role or `depends_on`.
 
-`watch` takes no `until` and no `on_drift`. A watched target that drifts always
-warns, and `MPAT_STRICT=1` turns that warning into an error like it does for a
-patch.
+`watch` takes no `on_drift`. A watched target that drifts always warns, and
+`MPAT_STRICT=1` turns that warning into an error like it does for a patch.
+
+`watch` does take [`until`](#until). A watch applies nothing, so the condition
+changes nothing at runtime; it exists to give the workaround a generated
+`still-needed[<target>]` test, for the cases `patch` cannot express, such as a
+per-instance `setattr` wrapper or an attribute your code creates on an upstream
+object:
+
+```python
+from mpat import Probe, Version, watch
+
+
+def ontospy_still_needs_shim() -> bool:
+    return not hasattr(Ontospy, "namespaces")
+
+
+watch(
+    "ontospy.core.ontospy.Ontospy",
+    until=Version("ontospy>=2.2") | Probe(ontospy_still_needs_shim),
+    note="data/upstream_shims.py adds .namespaces; see ontospy#120",
+)
+```
 
 ## Declaring in `pyproject.toml`
 
@@ -139,8 +160,19 @@ review_by = 2026-12-01
 note = "protobuf timeout wrapper in data/qdrant.py relies on this shape"
 ```
 
-`target` is required. `depends_on`, `review_by` and `note` are optional and
-mean what they mean on [`watch()`](#watch); `review_by` is a bare TOML date.
+`target` is required. `depends_on`, `until`, `review_by` and `note` are
+optional and mean what they mean on [`watch()`](#watch); `review_by` is a bare
+TOML date. `until` is a string in one of two forms:
+
+```toml
+until = "ontospy>=2.2"                                  # Version
+until = "data.upstream_shims.ontospy_still_needs_shim"  # Probe
+```
+
+A requirement with a version specifier becomes `Version`. A dotted path
+becomes a `Probe` around the zero-argument callable it names, imported when
+the condition is first evaluated, so the configuration can be read without
+importing your application. Anything else is a configuration error.
 Any other key, or a key of the wrong type, is a configuration error that names
 the entry.
 
@@ -284,9 +316,9 @@ It does not affect whether the patch is applied at import.
 
 ### `until`
 
-A condition that says when the patch is no longer needed. If it evaluates true at
-import, the patch is not applied and a message is logged at info level on the
-`mpat` logger.
+A condition that says when the workaround is no longer needed. On a `patch`, if
+it evaluates true at import, the patch is not applied and a message is logged
+at info level on the `mpat` logger. On a `watch` it has no runtime effect.
 
 `Version` takes a requirement string in the usual packaging syntax. It is false
 when the distribution is not installed at all.
@@ -320,9 +352,9 @@ until = Version("somelib>=2.4") & Version("otherlib>=1.2")
 `Until` is the protocol both satisfy: any zero-argument callable returning a bool
 works, but only `Version`, `Probe` and their combinations support the operators.
 
-A patch with `until` also gets a generated test that fails once the condition
-comes true, so the branch that deletes the patch is the one that goes green. See
-[pytest](pytest.md).
+A patch or watch with `until` also gets a generated test that fails once the
+condition comes true, so the branch that deletes the workaround is the one that
+goes green. See [pytest](pytest.md).
 
 ### `on_drift`
 

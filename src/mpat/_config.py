@@ -20,10 +20,12 @@ _DEPENDS_ON = "depends_on"
 _REVIEW_BY = "review_by"
 _NOTE = "note"
 _VALUE = "value"
+_UNTIL = "until"
 _TOML_SCALARS = (int, float, str, bool)
 _WATCH_FIELDS: dict[str, type | tuple[type, ...]] = {
     _TARGET: str,
     _DEPENDS_ON: list,
+    _UNTIL: str,
     _REVIEW_BY: date,
     _NOTE: str,
 }
@@ -39,6 +41,7 @@ _OVERRIDE_FIELDS: dict[str, type | tuple[type, ...]] = {
 class WatchSpec:
     target: str
     depends_on: tuple[str, ...] = ()
+    until: str | None = None
     review_by: date | None = None
     note: str = ""
 
@@ -119,6 +122,7 @@ def _watch_spec(label: str, data: dict[str, Any]) -> WatchSpec:
     return WatchSpec(
         target=data[_TARGET],
         depends_on=tuple(depends_on),
+        until=data.get(_UNTIL),
         review_by=data.get(_REVIEW_BY),
         note=data.get(_NOTE, ""),
     )

@@ -58,6 +58,7 @@ target = "fakeup.core.greet"
 depends_on = ["fakeup.LIMIT"]
 review_by = 2026-12-01
 note = "see fakeup#1"
+until = "fakeup>=99"
 
 [[tool.mpat.watch]]
 target = "fakeup.REGISTRY"
@@ -72,6 +73,7 @@ def test_parses_watch_entries(tmp_path):
     assert cfg.watches == (
         _config.WatchSpec(
             target="fakeup.core.greet",
+            until="fakeup>=99",
             depends_on=("fakeup.LIMIT",),
             review_by=date(2026, 12, 1),
             note="see fakeup#1",
@@ -99,6 +101,7 @@ def test_no_watch_entries(tmp_path):
         '[[tool.mpat.watch]]\ntarget = "a.b"\nreview_by = "2026-12-01"\n',
         '[[tool.mpat.watch]]\ntarget = "a.b"\nnote = 1\n',
         '[[tool.mpat.watch]]\ntarget = "a.b"\ndepend_on = ["a.c"]\n',
+        '[[tool.mpat.watch]]\ntarget = "a.b"\nuntil = 1\n',
     ],
 )
 def test_invalid_watch_entry_raises(tmp_path, body):

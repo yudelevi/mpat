@@ -511,3 +511,14 @@ def test_apply_overrides_does_nothing_in_collect_mode(upstream, tmp_path, monkey
 def test_apply_overrides_without_config_is_a_no_op(upstream):
     mpat.apply_overrides()
     assert _registry.declarations() == []
+
+
+def test_watch_accepts_until_without_runtime_effect(upstream, tmp_path):
+    locked_project(upstream, tmp_path, target="fakeup.LIMIT")
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 1")
+    with pytest.warns(UpstreamDriftWarning, match="value"):
+        mpat.watch("fakeup.LIMIT", until=mpat.Probe(lambda: True), note="n")
+    d = _registry.declarations()[0]
+    assert d.until is not None
+    assert d.until()
+    assert d.status == _registry.STATUS_WATCHED

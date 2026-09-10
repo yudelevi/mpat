@@ -380,3 +380,64 @@ def test_config_override_is_green_in_both_paths(pytester, upstream, monkeypatch)
     result = run(pytester, "-v")
     result.assert_outcomes(passed=2)
     result.stdout.fnmatch_lines(["mpat::drift[[]fakeup.LIMIT[]] PASSED*"])
+
+
+def watch_project(root: Path, until: str) -> None:
+    (root / "pyproject.toml").write_text(PYPROJECT + MPAT_SECTION)
+    (root / "app_patches.py").write_text(
+        f'import mpat\n\nmpat.watch("fakeup.LIMIT", until={until}, note="shim in app.py")\n'
+    )
+
+
+def test_watch_with_until_gets_a_still_needed_item(pytester, upstream, monkeypatch):
+    watch_project(pytester.path, "mpat.Probe(lambda: False)")
+    monkeypatch.syspath_prepend(str(pytester.path))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    result = run(pytester, "-v")
+    result.assert_outcomes(passed=2)
+    result.stdout.fnmatch_lines(["mpat::still-needed[[]fakeup.LIMIT[]] PASSED*"])
+
+
+def test_watch_still_needed_fails_once_upstream_is_fixed(pytester, upstream, monkeypatch):
+    watch_project(pytester.path, "mpat.Probe(lambda: True)")
+    monkeypatch.syspath_prepend(str(pytester.path))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    result = run(pytester)
+    result.assert_outcomes(failed=1, passed=1)
+    result.stdout.fnmatch_lines(
+        [
+            "*still-needed[[]fakeup.LIMIT[]]*",
+            "fakeup.LIMIT: upstream fixed, delete this watch. shim in app.py",
+        ]
+    )
+
+
+CONFIG_UNTIL_WATCHES = """
+[[tool.mpat.watch]]
+target = "fakeup.LIMIT"
+until = "packaging>9999"
+
+[[tool.mpat.watch]]
+target = "fakeup.core.greet"
+until = "probes.fixed"
+note = "shim in app.py"
+"""
+
+
+def test_config_watch_until_strings(pytester, upstream, monkeypatch):
+    root = pytester.path
+    (root / "pyproject.toml").write_text(PYPROJECT + "[tool.mpat]\n" + CONFIG_UNTIL_WATCHES)
+    (root / "probes.py").write_text("def fixed():\n    return True\n")
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    result = run(pytester, "-v")
+    result.assert_outcomes(passed=3, failed=1)
+    result.stdout.fnmatch_lines(
+        [
+            "mpat::still-needed[[]fakeup.LIMIT[]] PASSED*",
+            "mpat::still-needed[[]fakeup.core.greet[]] FAILED*",
+            "fakeup.core.greet: upstream fixed, delete this watch. shim in app.py",
+        ]
+    )

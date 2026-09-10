@@ -60,16 +60,32 @@ existence only, so mutating a watched registry's contents will not fail
 `mpat check`; watch the function or class that populates it instead.
 `watch(..., track_value=False)` records that a scalar exists and its kind but not
 its value, for settings your application assigns itself; if you want the value
-pinned, put the assignment and the `watch()` in the same module. `until`
-turns the patch off once upstream is fixed; `Version` takes a requirement
-string, `Probe` takes a zero-argument callable, and both combine with `|` and
-`&`. `review_by` is a nag date only. `on_drift="warn" | "skip" | "raise"`
+pinned, put the assignment and the `watch()` in the same module.
+`review_by` is a nag date only. `on_drift="warn" | "skip" | "raise"`
 decides what happens at import when the lock no longer matches; `MPAT_STRICT=1`
 forces `raise`. Passing a target as an object instead of a dotted string works
 too, resolved through `__module__` and `__qualname__`. Two dotted targets that
 name the same attribute of the same owner are refused as aliases, but the same
 inherited method on two sibling subclasses is not an alias: each patch lands on
 its own class and the base class is left alone.
+
+Say when a workaround can go. `until` is accepted by `patch` and by `watch`:
+`Version` takes a requirement string, `Probe` takes a zero-argument callable,
+and both combine with `|` and `&`. On a patch it also turns the patch off once
+satisfied. On a watch it has no runtime effect, because a watch applies
+nothing, but either way the generated `still-needed[<target>]` test fails the
+day upstream is fixed. That makes a `watch` with `until` the replacement for a
+hand-written "still needed" test around a workaround that is not a `@patch`
+target, such as a per-instance `setattr` wrapper or an attribute your code
+creates on an upstream object:
+
+```python
+watch(
+    "ontospy.core.ontospy.Ontospy",
+    until=Version("ontospy>=2.2") | Probe(ontospy_still_needs_shim),
+    note="data/upstream_shims.py adds .namespaces; see ontospy#120",
+)
+```
 
 `patch` imports the target when the decorator runs. For an optional dependency
 that is the wrong moment, so `when_imported=True` defers it:
@@ -202,7 +218,10 @@ note = "protobuf timeout wrapper in data/qdrant.py relies on this shape"
 ```
 
 `target` is required; `depends_on`, `review_by` and `note` mean what they mean
-on `watch()`. The entry is locked with `declared_in = "pyproject.toml"`, the
+on `watch()`. `until` is a string: a requirement with a version specifier such
+as `until = "ontospy>=2.2"` becomes `Version`, and a dotted path such as
+`until = "data.upstream_shims.ontospy_still_needs_shim"` becomes a `Probe`
+that imports the callable when first evaluated. The entry is locked with `declared_in = "pyproject.toml"`, the
 denylist applies to it and its `depends_on`, and a malformed entry is a
 configuration error (exit 2) that names the entry.
 
@@ -247,7 +266,7 @@ mpat::still-needed[somelib.client.Client.request] PASSED
 ```
 
 One `drift` item per declared or locked target, one `still-needed` item per
-patch with `until`. They belong to no file of yours, so they are collected by
+patch or watch with `until`. They belong to no file of yours, so they are collected by
 `pytest` and by `pytest <dir>`, and left out when you name a file or a nodeid:
 `pytest tests/test_client.py` runs what you asked for and nothing else. Disable
 them everywhere with `--no-mpat`, or `mpat = false` under
