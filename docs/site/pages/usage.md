@@ -3,7 +3,7 @@
 Everything public lives at the top of the package.
 
 ```python
-from mpat import Probe, Until, Version, patch, watch
+from mpat import Probe, Until, Version, apply_all, patch, watch
 ```
 
 ## `patch()`
@@ -17,6 +17,7 @@ def patch(
     on_drift: str = "warn",
     review_by: date | None = None,
     note: str = "",
+    when_imported: bool = False,
 ) -> Callable[[F], F]
 ```
 
@@ -42,6 +43,22 @@ not double-wrap.
 
 A replacement must be the same kind of callable as the original: sync for sync,
 async for async, generator for generator, async generator for async generator.
+
+By default the decorator imports the target when it runs. Pass
+[`when_imported=True`](#when_imported) to apply the patch on the target's first
+import instead.
+
+## `apply_all()`
+
+```python
+def apply_all() -> None
+```
+
+Imports every module a `when_imported=True` patch is still waiting on, which
+applies those patches now. Call it from a startup path that wants every patch in
+place before the first request, at the cost of importing the optional
+dependencies eagerly. A module that is not installed raises
+`ModuleNotFoundError` from here, exactly as `import` would.
 
 ## `watch()`
 
@@ -227,6 +244,45 @@ compared and the patch is applied.
 
 `until` is evaluated before the drift check. A patch that is already unnecessary
 does not warn about drift.
+
+### `when_imported`
+
+By default `patch` imports the target's module when the decorator runs, so a
+patch on an optional dependency raises `ModuleNotFoundError` on any machine
+without it. `when_imported=True` registers the declaration without importing
+anything and applies the patch from a post-import hook the first time the
+target's top-level module is imported.
+
+```python
+@patch("optionallib.Client.request", when_imported=True)
+def request(original, self, *args, **kwargs): ...
+```
+
+If the top-level module is already imported when the decorator runs, the patch
+is applied immediately. If it is never imported, nothing happens. Everything the
+eager form checks at decoration, the deferred form checks when the hook fires:
+`TargetNotFound`, `UnsupportedTarget`, `KindMismatch`, `until`, and the drift
+check with its `on_drift` behaviour. An error from those propagates out of the
+`import` statement that triggered the hook.
+
+The hook keys on the first dotted segment of the target, `optionallib` above,
+because that is the only module name that can be known without importing.
+Importing `optionallib.client` imports `optionallib` first, so the hook fires
+either way; resolving the target then imports the submodule it lives in.
+
+The hook is a finder at the front of `sys.meta_path`. It only claims module
+names a deferred patch is waiting on, hands the real loader back to the module
+before executing it, and removes itself from the module's entry once fired, so
+`module.__loader__` and `module.__spec__` look exactly as they would without
+`mpat`.
+
+`mpat lock` and `mpat check` do not defer. They import the patch modules with
+`MPAT_COLLECT=1`, which registers the declaration and nothing else, and then
+resolve every target to fingerprint it. A deferred target therefore still has to
+be importable when you lock.
+
+`apply_all()` imports every pending module, for code that wants the patches
+applied before it proceeds.
 
 ### `review_by`
 

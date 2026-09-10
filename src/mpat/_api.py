@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from datetime import date
 from typing import Any, Protocol, TypeVar
 
+from mpat import _hooks
 from mpat._config import runtime_config
 from mpat._errors import AlreadyPatched, KindMismatch, UpstreamDriftError, UpstreamDriftWarning
 from mpat._fingerprint import OK, compare, fingerprint
@@ -18,6 +19,7 @@ from mpat._registry import (
     ROLE_PATCH,
     ROLE_WATCH,
     STATUS_APPLIED,
+    STATUS_DEFERRED,
     STATUS_SKIPPED_DRIFT,
     STATUS_SKIPPED_UNTIL,
     STATUS_WATCHED,
@@ -161,6 +163,46 @@ def _wrap(fn: Callable[..., Any], original: Any, decl: Declaration) -> Callable[
     return wrapper
 
 
+def _check_kind(fn: Replacement, resolved: Resolved) -> None:
+    if callable_kind(fn) != callable_kind(resolved.obj):
+        raise KindMismatch(
+            f"{resolved.target}: original is {callable_kind(resolved.obj)}, "
+            f"replacement is {callable_kind(fn)}"
+        )
+
+
+def _resolve_patchable(canonical: str) -> Resolved:
+    resolved = resolve(canonical)
+    check_supported(resolved)
+    return resolved
+
+
+def _apply(*, decl: Declaration, fn: Replacement, resolved: Resolved) -> None:
+    if decl.until is not None and decl.until():
+        decl.status = STATUS_SKIPPED_UNTIL
+        log.info("%s: not applied, until=%r is satisfied. %s", decl.target, decl.until, decl.note)
+        return
+    if not _handle_drift(decl, resolved):
+        decl.status = STATUS_SKIPPED_DRIFT
+        return
+    original = _live_original(resolved, decl)
+    wrapper = _wrap(fn=fn, original=original, decl=decl)
+    replacement = resolved.descriptor(wrapper) if resolved.descriptor else wrapper
+    setattr(resolved.parent, resolved.attr, replacement)
+    mark_applied(id(original), decl)
+    decl.status = STATUS_APPLIED
+
+
+def _apply_deferred(*, decl: Declaration, fn: Replacement) -> None:
+    resolved = _resolve_patchable(decl.target)
+    _check_kind(fn, resolved)
+    _apply(decl=decl, fn=fn, resolved=resolved)
+
+
+def _top_level(canonical: str) -> str:
+    return canonical.partition(".")[0]
+
+
 def patch(
     target: str | object,
     *,
@@ -169,21 +211,18 @@ def patch(
     on_drift: str = ON_DRIFT_WARN,
     review_by: date | None = None,
     note: str = "",
+    when_imported: bool = False,
 ) -> Callable[[F], F]:
     if on_drift not in ON_DRIFT_VALUES:
         raise ValueError(f"on_drift must be one of {ON_DRIFT_VALUES}, got {on_drift!r}")
     canonical = canonical_target(target)
     _check_declaration_forbidden(canonical, depends_on)
-    resolved = resolve(canonical)
-    check_supported(resolved)
+    resolved = None if when_imported else _resolve_patchable(canonical)
     declared_in = _caller_file()
 
     def decorator(fn: F) -> F:
-        if callable_kind(fn) != callable_kind(resolved.obj):
-            raise KindMismatch(
-                f"{canonical}: original is {callable_kind(resolved.obj)}, "
-                f"replacement is {callable_kind(fn)}"
-            )
+        if resolved is not None:
+            _check_kind(fn, resolved)
         decl = Declaration(
             target=canonical,
             role=ROLE_PATCH,
@@ -198,22 +237,21 @@ def patch(
         register(decl)
         if collect_mode():
             return fn
-        if until is not None and until():
-            decl.status = STATUS_SKIPPED_UNTIL
-            log.info("%s: not applied, until=%r is satisfied. %s", canonical, until, note)
+        if resolved is not None:
+            _apply(decl=decl, fn=fn, resolved=resolved)
             return fn
-        if not _handle_drift(decl, resolved):
-            decl.status = STATUS_SKIPPED_DRIFT
-            return fn
-        original = _live_original(resolved, decl)
-        wrapper = _wrap(fn=fn, original=original, decl=decl)
-        replacement = resolved.descriptor(wrapper) if resolved.descriptor else wrapper
-        setattr(resolved.parent, resolved.attr, replacement)
-        mark_applied(id(original), decl)
-        decl.status = STATUS_APPLIED
+        decl.status = STATUS_DEFERRED
+        _hooks.when_imported(
+            _top_level(canonical), functools.partial(_apply_deferred, decl=decl, fn=fn)
+        )
         return fn
 
     return decorator
+
+
+def apply_all() -> None:
+    """Import every module a `when_imported=True` patch is still waiting on."""
+    _hooks.import_pending()
 
 
 def watch(

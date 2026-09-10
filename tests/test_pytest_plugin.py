@@ -271,3 +271,35 @@ def test_collection_applies_the_patches_for_later_tests(pytester, upstream, monk
     forget_patch_module(upstream)
     result = run(pytester, "-v")
     result.assert_outcomes(passed=3)
+
+
+def test_collection_applies_when_imported_patches_for_later_tests(pytester, upstream, monkeypatch):
+    root = pytester.path
+    (root / "pyproject.toml").write_text(PYPROJECT + MPAT_SECTION)
+    (root / "app_patches.py").write_text(
+        textwrap.dedent(
+            """
+            import mpat
+
+            @mpat.patch("fakeup.core.greet", when_imported=True)
+            def shout(original, name, punct="!"):
+                return original(name, punct).upper()
+            """
+        )
+    )
+    (root / "test_patched_behaviour.py").write_text(
+        textwrap.dedent(
+            """
+            import fakeup.core
+
+
+            def test_patch_is_active():
+                assert fakeup.core.greet("world") == "HI WORLD!"
+            """
+        )
+    )
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    forget_patch_module(upstream)
+    result = run(pytester, "-v")
+    result.assert_outcomes(passed=2)

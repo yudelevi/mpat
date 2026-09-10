@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- New `patch(..., when_imported=True)`. The declaration registers without
+  importing the target; the patch is applied by a post-import hook the first
+  time the target's top-level module is imported, or immediately if it already
+  is. This makes optional dependencies patchable: a target whose distribution is
+  not installed no longer raises at declaration, it just never fires.
+  `mpat lock` and `mpat check` are unchanged, so the target still has to be
+  importable when you lock.
+- New `mpat.apply_all()`, which imports every module a `when_imported` patch is
+  still waiting on and so applies them all now.
+
 ## 0.2.0
 
 - The generated drift tests are now collected by a pytest plugin. Installing

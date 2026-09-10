@@ -68,6 +68,23 @@ name the same attribute of the same owner are refused as aliases, but the same
 inherited method on two sibling subclasses is not an alias: each patch lands on
 its own class and the base class is left alone.
 
+`patch` imports the target when the decorator runs. For an optional dependency
+that is the wrong moment, so `when_imported=True` defers it:
+
+```python
+@patch("optionallib.Client.request", when_imported=True)
+def request(original, self, *args, **kwargs):
+    ...
+```
+
+The declaration registers without importing anything. A post-import hook
+applies the patch the first time `optionallib` is imported, or right away if it
+already is, and the `until`, drift and kind checks run at that point. If
+`optionallib` is never imported, nothing happens. `mpat.apply_all()` imports
+every module a deferred patch is still waiting on, for code that wants the
+patches in place before it starts. Locking is unchanged: `mpat lock` has to be
+able to import the target.
+
 ## Lock and check
 
 ```toml
