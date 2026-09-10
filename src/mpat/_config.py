@@ -15,6 +15,9 @@ TOOL_SECTION = "mpat"
 WATCH_KEY = "watch"
 OVERRIDE_KEY = "override"
 
+_MODULES = "modules"
+_ALLOW = "allow"
+_SECTION_KEYS = frozenset({_MODULES, _ALLOW, WATCH_KEY, OVERRIDE_KEY})
 _TARGET = "target"
 _DEPENDS_ON = "depends_on"
 _REVIEW_BY = "review_by"
@@ -150,13 +153,35 @@ def _unique_targets(specs: Sequence[WatchSpec | OverrideSpec]) -> None:
         seen.add(spec.target)
 
 
+def _table(data: Mapping[str, Any], key: str, *, parent: str = "") -> Mapping[str, Any]:
+    value = data.get(key, {})
+    if not isinstance(value, dict):
+        name = f"{parent}.{key}" if parent else key
+        raise MpatError(f"{PYPROJECT}: {name} must be a table, got {type(value).__name__}")
+    return value
+
+
+def _known_keys(section: Mapping[str, Any]) -> None:
+    for key in section:
+        if key not in _SECTION_KEYS:
+            raise MpatError(f"{PYPROJECT}: [tool.{TOOL_SECTION}] unknown key {key!r}")
+
+
+def _str_list(section: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = section.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise MpatError(f"{PYPROJECT}: [tool.{TOOL_SECTION}] {key} must be a list of str")
+    return tuple(value)
+
+
 def load_config(start: Path | None = None) -> Config | None:
     root = find_project_root(start or Path.cwd())
     if root is None:
         return None
     data = tomllib.loads((root / PYPROJECT).read_text(encoding="utf-8"))
-    tool = data.get("tool", {})
-    section = tool.get(TOOL_SECTION, {})
+    tool = _table(data, "tool")
+    section = _table(tool, TOOL_SECTION, parent="tool")
+    _known_keys(section)
     watches = tuple(_watch_spec(label, entry) for label, entry in _entries(section, WATCH_KEY))
     overrides = tuple(
         _override_spec(label, entry) for label, entry in _entries(section, OVERRIDE_KEY)
@@ -164,8 +189,8 @@ def load_config(start: Path | None = None) -> Config | None:
     _unique_targets((*watches, *overrides))
     return Config(
         root=root,
-        modules=tuple(section.get("modules", ())),
-        allow=tuple(section.get("allow", ())),
+        modules=_str_list(section, _MODULES),
+        allow=_str_list(section, _ALLOW),
         declared=TOOL_SECTION in tool,
         watches=watches,
         overrides=overrides,

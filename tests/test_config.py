@@ -197,3 +197,25 @@ def test_declares_anything(tmp_path):
     cfg = _config.load_config(tmp_path)
     assert cfg is not None
     assert cfg.declares_anything
+
+
+@pytest.mark.parametrize(
+    ("body", "problem"),
+    [
+        ('[tool.mpat]\nmodules = "a"\n', "modules must be a list of str"),
+        ("[tool.mpat]\nmodules = [1]\n", "modules must be a list of str"),
+        ('[tool.mpat]\nallow = "x"\n', "allow must be a list of str"),
+        ("[tool.mpat]\nbogus = 1\n", "unknown key 'bogus'"),
+        ("[tool]\nmpat = 5\n", "tool.mpat must be a table"),
+    ],
+)
+def test_invalid_top_level_section_raises(tmp_path, body, problem):
+    write_pyproject(tmp_path, body)
+    with pytest.raises(MpatError, match=problem):
+        _config.load_config(tmp_path)
+
+
+def test_top_level_tool_must_be_a_table(tmp_path):
+    (tmp_path / "pyproject.toml").write_text('tool = 5\n[project]\nname = "x"\n')
+    with pytest.raises(MpatError, match="tool must be a table"):
+        _config.load_config(tmp_path)
