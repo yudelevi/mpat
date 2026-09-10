@@ -19,6 +19,7 @@ def config(
 ) -> Config:
     return Config(
         root=Path("/proj"),
+        path=Path("/proj/pyproject.toml"),
         modules=modules,
         allow=allow,
         declared=True,

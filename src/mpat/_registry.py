@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from mpat._config import PYPROJECT, Config, OverrideSpec, WatchSpec
+from mpat._config import CONFIG_FILENAMES, Config, OverrideSpec, WatchSpec
 from mpat._errors import MpatError
 from mpat._targets import check_forbidden
 from mpat._until import Until, until_from_string
@@ -98,8 +98,8 @@ def _check_forbidden(target: str, depends_on: Sequence[str], *, allow: Sequence[
         check_forbidden(dep, allow=allow)
 
 
-def watch_declaration(spec: WatchSpec, *, root: Path) -> Declaration:
-    declared_in = str(root / PYPROJECT)
+def watch_declaration(spec: WatchSpec, *, path: Path) -> Declaration:
+    declared_in = str(path)
     return Declaration(
         target=spec.target,
         role=ROLE_WATCH,
@@ -113,8 +113,8 @@ def watch_declaration(spec: WatchSpec, *, root: Path) -> Declaration:
     )
 
 
-def override_declaration(spec: OverrideSpec, *, root: Path) -> Declaration:
-    declared_in = str(root / PYPROJECT)
+def override_declaration(spec: OverrideSpec, *, path: Path) -> Declaration:
+    declared_in = str(path)
     return Declaration(
         target=spec.target,
         role=ROLE_WATCH,
@@ -130,19 +130,19 @@ def override_declaration(spec: OverrideSpec, *, root: Path) -> Declaration:
 
 
 def config_declarations(config: Config) -> list[Declaration]:
-    """Build the declarations pyproject.toml makes, checked against the denylist."""
+    """Build the declarations the configuration file makes, checked against the denylist."""
     for spec in config.watches:
         _check_forbidden(spec.target, spec.depends_on, allow=config.allow)
     for spec in config.overrides:
         _check_forbidden(spec.target, (), allow=config.allow)
     return [
-        *(watch_declaration(spec, root=config.root) for spec in config.watches),
-        *(override_declaration(spec, root=config.root) for spec in config.overrides),
+        *(watch_declaration(spec, path=config.path) for spec in config.watches),
+        *(override_declaration(spec, path=config.path) for spec in config.overrides),
     ]
 
 
 def from_config(decl: Declaration) -> bool:
-    return Path(decl.declared_in).name == PYPROJECT
+    return Path(decl.declared_in).name in CONFIG_FILENAMES
 
 
 def _register_config(config: Config) -> None:
@@ -150,14 +150,14 @@ def _register_config(config: Config) -> None:
     for decl in config_declarations(config):
         if decl.target in from_code:
             raise MpatError(
-                f"{decl.target}: declared twice: {PYPROJECT} and "
+                f"{decl.target}: declared twice: {config.path.name} and "
                 f"{from_code[decl.target].declared_in}"
             )
         register(decl)
 
 
 def collect_declarations(config: Config, *, apply: bool) -> list[Declaration]:
-    """Import the patch modules, add what pyproject.toml declares, and return it all.
+    """Import the patch modules, add what the configuration file declares, and return it all.
 
     apply=True imports the modules the way the application does, so the patches
     take effect and a module cached by this import is the patched one. apply=False

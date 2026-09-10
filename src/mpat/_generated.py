@@ -20,7 +20,8 @@ UNCONFIGURED_ROLE = "config"
 UNCONFIGURED_STATUS = "unconfigured"
 UNCONFIGURED_NOTE = (
     "[tool.mpat] declares nothing; add modules, [[tool.mpat.watch]] or "
-    "[[tool.mpat.override]] to pyproject.toml"
+    "[[tool.mpat.override]] to pyproject.toml, or the same keys without the "
+    "tool.mpat prefix to mpat.toml"
 )
 
 

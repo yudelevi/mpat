@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
-from mpat._config import Config, load_config
+from mpat._config import CONFIG_FILENAME, PYPROJECT, Config, load_config
 from mpat._errors import LockError, MpatError
 from mpat._fingerprint import (
     BODY,
@@ -68,12 +68,11 @@ _FOOTERS: tuple[tuple[tuple[str, ...], str], ...] = (
 def _require_config() -> Config:
     config = load_config()
     if config is None:
-        raise MpatError("no pyproject.toml found in the current directory or its parents")
-    if not config.declares_anything:
         raise MpatError(
-            "[tool.mpat] in pyproject.toml lists no modules and no watch entries; "
-            "nothing to collect"
+            f"no {PYPROJECT} or {CONFIG_FILENAME} found in the current directory or its parents"
         )
+    if not config.declares_anything:
+        raise MpatError(f"{config.where} lists no modules and no watch entries; nothing to collect")
     return config
 
 

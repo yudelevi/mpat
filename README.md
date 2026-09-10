@@ -112,11 +112,15 @@ able to import the target.
 modules = ["myapp.patches"]
 ```
 
+Or the same keys, without the `[tool.mpat]` prefix, in a standalone `mpat.toml`
+next to it. `mpat.toml` wins when both exist.
+
 ```
 mpat lock     # fingerprint everything, write mpat.lock, commit it
 mpat check    # exit 1 unless every target is ok
 mpat check --json
 mpat show somelib.client.Client.request
+mpat diff somelib.client.Client.request
 ```
 
 `mpat lock` and `mpat check` import the modules listed in `[tool.mpat] modules`
@@ -206,7 +210,7 @@ change, fix or delete the patch, run `mpat lock`, commit.
 
 ## Declare without code
 
-A watch needs no Python at all. Declare it in `pyproject.toml` and `mpat lock`,
+A watch needs no Python at all. Declare it in `pyproject.toml` (or `mpat.toml`) and `mpat lock`,
 `mpat check` and the pytest plugin pick it up alongside the modules:
 
 ```toml

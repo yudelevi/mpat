@@ -316,3 +316,25 @@ def test_override_locks_existence_only_and_checks_clean_either_way(tmp_path, ups
     upstream.edit("__init__.py", "LIMIT = 16", "LIMIT_RENAMED = 16")
     assert _cli.main(["check"]) == _cli.EXIT_DRIFT
     assert "missing" in capsys.readouterr().out
+
+
+def test_mpat_toml_watch_locks_with_mpat_toml_as_source(tmp_path, upstream, capsys):
+    (tmp_path / "mpat.toml").write_text('[[watch]]\ntarget = "fakeup.core.greet"\n')
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    lock = _lock.read_lock(_lock.lock_path(tmp_path))
+    assert lock.entries["fakeup.core.greet"].declared_in == "mpat.toml"
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    assert "mpat.toml" in capsys.readouterr().out
+
+
+def test_no_config_file_error_names_both_files(tmp_path, capsys):
+    assert _cli.main(["check"]) == _cli.EXIT_USAGE
+    err = capsys.readouterr().err
+    assert "pyproject.toml" in err
+    assert "mpat.toml" in err
+
+
+def test_empty_mpat_toml_is_a_usage_error(tmp_path, capsys):
+    (tmp_path / "mpat.toml").write_text("")
+    assert _cli.main(["check"]) == _cli.EXIT_USAGE
+    assert "mpat.toml lists no modules" in capsys.readouterr().err

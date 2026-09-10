@@ -1,13 +1,23 @@
 # CLI
 
-Three commands. Both `lock` and `check` read `[tool.mpat] modules` from the
-nearest `pyproject.toml`, so run them from anywhere inside the project.
+Four commands. `lock`, `check` and `diff` read the configuration from the
+nearest `mpat.toml` or `pyproject.toml`, so run them from anywhere inside the
+project.
 
 ```toml
 # pyproject.toml
 [tool.mpat]
 modules = ["myapp.patches"]
 ```
+
+```toml
+# mpat.toml, the same keys without the [tool.mpat] prefix
+modules = ["myapp.patches"]
+```
+
+Walking up from the working directory, the first directory that has either file
+is the project root. In that directory `mpat.toml` wins and any `[tool.mpat]` in
+`pyproject.toml` is ignored, the same rule `ruff` and `ty` use.
 
 ## `mpat lock`
 
