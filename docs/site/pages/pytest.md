@@ -42,6 +42,28 @@ Directories include the ones `testpaths` supplies, so a project with
 are ordered by target rather than by the order your patch modules happen to
 import, so every worker collects the same list.
 
+## Monorepos
+
+The plugin finds `[tool.mpat]` by walking up from each directory you pass, not
+only from pytest's rootdir. In a repository with one `pyproject.toml` per
+service and none at the root, `pytest services/api/tests` run from the root
+collects the api service's items, and `pytest services/api/tests
+services/web/tests` collects both sets. Each service reads its own `mpat.lock`.
+
+When the project is not the rootdir's own, its collector is named after the
+directory, so the two sets never share a node id:
+
+```
+mpat[services/api]::drift[somelib.client.Client.request] PASSED
+mpat[services/web]::drift[otherlib.Session.open] PASSED
+```
+
+A project whose `pyproject.toml` is the rootdir's keeps the plain `mpat::` name,
+and is collected whenever the arguments are directories, as before. Nothing
+below the rootdir is scanned for you: a bare `pytest` at a root with no
+`[tool.mpat]` collects no items, so set `testpaths` to the service test
+directories if you want a bare `pytest` to cover them.
+
 ## `drift[...]`
 
 One item per declared target, per `depends_on` entry, and per lockfile entry that

@@ -185,6 +185,12 @@ them everywhere with `--no-mpat`, or `mpat = false` under
 `[tool.pytest.ini_options]`. `pytest-xdist` works: the items are ordered by
 target, so every worker collects the same list.
 
+In a monorepo with one `pyproject.toml` per service, `pytest services/api/tests`
+from the repository root finds the service's `[tool.mpat]` by walking up from
+the directory you named, and collects its items as `mpat[services/api]::...`.
+Name several service directories and each gets its own set, read from its own
+`mpat.lock`.
+
 Collecting them imports your patch modules the way your application does, so the
 patches are active for the rest of the test session exactly as in production.
 
