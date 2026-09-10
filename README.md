@@ -252,7 +252,12 @@ override has been applied in that process. A workaround with any logic in it
 is still `@patch`.
 
 A project can have `modules`, `[[tool.mpat.watch]]` and `[[tool.mpat.override]]`
-entries in any combination. A target declared twice, in code and in
+entries in any combination. `modules` is imported before the TOML entries
+resolve, so it is also where a shim that has to run before a watched target can
+be imported at all belongs: a project whose TOML watches target a library that
+only imports once a shim is in place keeps that shim module in `modules`.
+Emptying the list is a configuration error (exit 2) naming the target that could
+not be imported, not a traceback. A target declared twice, in code and in
 `pyproject.toml` or in both TOML forms, is refused rather than silently
 merged, so there is no precedence to remember.
 

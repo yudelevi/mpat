@@ -7,7 +7,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from mpat._errors import ForbiddenTarget, TargetNotFound, UnsupportedTarget
+from mpat._errors import (
+    ForbiddenTarget,
+    TargetImportError,
+    TargetNotFound,
+    UnsupportedTarget,
+)
 
 DEFAULT_DENY: tuple[str, ...] = (
     "mpat",
@@ -50,19 +55,29 @@ def canonical_target(target: str | object) -> str:
     return f"{module}.{qualname}"
 
 
-def _import_prefix(parts: list[str]) -> tuple[types.ModuleType, list[str]]:
+def _import_prefix(parts: list[str], *, target: str) -> tuple[types.ModuleType, list[str]]:
     for i in range(len(parts), 0, -1):
         name = ".".join(parts[:i])
         try:
             return importlib.import_module(name), parts[i:]
         except ModuleNotFoundError as exc:
             if exc.name is None or not name.startswith(exc.name):
-                raise
+                raise _import_failed(target=target, exc=exc) from exc
+        except ImportError as exc:
+            raise _import_failed(target=target, exc=exc) from exc
     raise TargetNotFound(f"no importable module prefix in {'.'.join(parts)!r}")
 
 
+def _import_failed(*, target: str, exc: ImportError) -> TargetImportError:
+    return TargetImportError(
+        f"{target!r}: importing it raised {type(exc).__name__}: {exc}. "
+        f"If another module has to be imported first for this target to import, "
+        f"list that module in [tool.mpat] modules."
+    )
+
+
 def resolve(target: str) -> Resolved:
-    module, rest = _import_prefix(target.split("."))
+    module, rest = _import_prefix(target.split("."), target=target)
     if not rest:
         raise TargetNotFound(f"{target!r} is a module, not an attribute of one")
     parent: Any = module

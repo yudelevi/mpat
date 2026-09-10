@@ -1,7 +1,12 @@
 import pytest
 
 from mpat import _targets
-from mpat._errors import ForbiddenTarget, TargetNotFound, UnsupportedTarget
+from mpat._errors import (
+    ForbiddenTarget,
+    TargetImportError,
+    TargetNotFound,
+    UnsupportedTarget,
+)
 
 
 def test_canonical_from_object(upstream):
@@ -56,7 +61,17 @@ def test_resolve_propagates_real_import_errors(upstream):
         "from fakeup.deco import tag",
         "import not_installed_xyz\nfrom fakeup.deco import tag",
     )
-    with pytest.raises(ModuleNotFoundError):
+    with pytest.raises(TargetImportError, match="not_installed_xyz"):
+        _targets.resolve("fakeup.core.greet")
+
+
+def test_resolve_reports_import_error_raised_inside_the_target_module(upstream):
+    upstream.edit(
+        "core.py",
+        "from fakeup.deco import tag",
+        "from fakeup.deco import tag, gone",
+    )
+    with pytest.raises(TargetImportError, match=r"\[tool.mpat\] modules"):
         _targets.resolve("fakeup.core.greet")
 
 

@@ -6,6 +6,10 @@ class TargetNotFound(MpatError):
     pass
 
 
+class TargetImportError(MpatError, ImportError):
+    pass
+
+
 class UnsupportedTarget(MpatError):
     pass
 

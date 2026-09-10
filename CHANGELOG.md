@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.2
+
+- A target whose module raises `ImportError` on import now fails as a named
+  configuration error (exit 2) instead of a bare traceback, and says that a
+  module that has to be imported first belongs in `[tool.mpat] modules`. The new
+  `TargetImportError` subclasses both `MpatError` and `ImportError`, so it is
+  still caught by anything that caught the raw error, and it is not
+  `TargetNotFound`, so `mpat check` never reports a broken environment as
+  `missing`.
+
 ## 0.2.1
 
 - New `patch(..., when_imported=True)`. The declaration registers without
