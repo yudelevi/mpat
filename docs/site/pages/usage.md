@@ -3,7 +3,7 @@
 Everything public lives at the top of the package.
 
 ```python
-from mpat import Probe, Until, Version, apply_all, patch, watch
+from mpat import Probe, Until, Version, apply_all, apply_overrides, patch, watch
 ```
 
 ## `patch()`
@@ -59,6 +59,15 @@ applies those patches now. Call it from a startup path that wants every patch in
 place before the first request, at the cost of importing the optional
 dependencies eagerly. A module that is not installed raises
 `ModuleNotFoundError` from here, exactly as `import` would.
+
+## `apply_overrides()`
+
+```python
+def apply_overrides() -> None
+```
+
+Assigns every [`[[tool.mpat.override]]`](#overrides) value from the nearest
+`pyproject.toml`, once per process. With no `pyproject.toml` it does nothing.
 
 ## `watch()`
 
@@ -141,8 +150,49 @@ carries `declared_in = "pyproject.toml"`. The target is resolved when it is
 locked or checked, not when the configuration is read, and the denylist applies
 to it and to its `depends_on` the same as in code.
 
-A target declared both in code and in `pyproject.toml` is refused as declared
-twice, naming both places. Delete one of them; there is no precedence.
+### Overrides
+
+A patch whose whole job is to assign a scalar is an `[[tool.mpat.override]]`
+entry:
+
+```toml
+[[tool.mpat.override]]
+target = "engineio.payload.Payload.max_decode_packets"
+value = 500
+note = "engineio default 16 500s long-polling clients (zauberzeug/nicegui#209)"
+review_by = 2026-12-01
+```
+
+`target` and `value` are required; `value` is a TOML integer, float, string
+or boolean. `note` and `review_by` are optional. The application applies them
+with one call at startup, which is the only code an override needs:
+
+```python
+import mpat
+
+mpat.apply_overrides()
+```
+
+For each entry `apply_overrides()` resolves the target, checks that the
+attribute exists and has exactly the value's type, records the previous value,
+and assigns. `bool` is a subclass of `int` in Python but not here: `value = true`
+on an int attribute and `value = 1` on a bool attribute both raise
+`UnsupportedTarget`, as does a value of the wrong type on a function, a
+property or a dict. A second call in the same process assigns nothing. Under
+`MPAT_COLLECT=1` nothing is assigned either, so `mpat lock` and `mpat check`
+never touch the live object. The denylist applies.
+
+An override is also a watch with `track_value=False`: the lock records that the
+attribute exists and what kind of thing it is, never its value, so `mpat lock`
+in a fresh process and the pytest plugin after `apply_overrides()` has run
+agree. A rename or removal upstream still reports `missing`. A workaround with
+any logic in it is still a [`patch`](#patch).
+
+### One declaration per target
+
+A target declared twice, in code and in `pyproject.toml` or in both a `watch`
+and an `override` entry, is refused, naming both places. Delete one of them;
+there is no precedence.
 
 ## Targets
 

@@ -328,3 +328,55 @@ def test_config_watch_duplicating_code_fails_collection(pytester, upstream, monk
     result = run(pytester)
     result.assert_outcomes(errors=1)
     result.stdout.fnmatch_lines(["*declared twice: pyproject.toml and*app_patches.py*"])
+
+
+APP_ASSIGNS_LIMIT = "import fakeup\n\nfakeup.LIMIT = 500\n"
+CONFTEST_IMPORTS_APP = "import myapp\n"
+TEST_APP_VALUE = "import fakeup\n\n\ndef test_app_value():\n    assert fakeup.LIMIT == 500\n"
+
+
+def issue_5_project(root: Path, watch_kwargs: str) -> None:
+    (root / "pyproject.toml").write_text(PYPROJECT + MPAT_SECTION)
+    (root / "app_patches.py").write_text(
+        f'import mpat\n\nmpat.watch("fakeup.LIMIT"{watch_kwargs})\n'
+    )
+    (root / "myapp.py").write_text(APP_ASSIGNS_LIMIT)
+    (root / "conftest.py").write_text(CONFTEST_IMPORTS_APP)
+    (root / "test_app.py").write_text(TEST_APP_VALUE)
+
+
+def test_watch_with_value_tracked_is_red_after_the_app_assigns_it(pytester, upstream, monkeypatch):
+    issue_5_project(pytester.path, "")
+    monkeypatch.syspath_prepend(str(pytester.path))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    forget_patch_module(upstream)
+    result = run(pytester)
+    result.assert_outcomes(failed=1, passed=1)
+    result.stdout.fnmatch_lines(["fakeup.LIMIT: value."])
+
+
+def test_watch_without_value_tracking_is_green_in_both_paths(pytester, upstream, monkeypatch):
+    issue_5_project(pytester.path, ", track_value=False")
+    monkeypatch.syspath_prepend(str(pytester.path))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    forget_patch_module(upstream)
+    result = run(pytester, "-v")
+    result.assert_outcomes(passed=2)
+    result.stdout.fnmatch_lines(["mpat::drift[[]fakeup.LIMIT[]] PASSED*"])
+
+
+def test_config_override_is_green_in_both_paths(pytester, upstream, monkeypatch):
+    root = pytester.path
+    (root / "pyproject.toml").write_text(
+        PYPROJECT + '[tool.mpat]\n[[tool.mpat.override]]\ntarget = "fakeup.LIMIT"\nvalue = 500\n'
+    )
+    (root / "conftest.py").write_text("import mpat\n\nmpat.apply_overrides()\n")
+    (root / "test_app.py").write_text(TEST_APP_VALUE)
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    upstream.purge()
+    result = run(pytester, "-v")
+    result.assert_outcomes(passed=2)
+    result.stdout.fnmatch_lines(["mpat::drift[[]fakeup.LIMIT[]] PASSED*"])

@@ -22,6 +22,12 @@
   patch module still gets `mpat lock`, `mpat check` and the pytest items. The
   entry is locked with `declared_in = "pyproject.toml"`. A target declared
   both in code and in `pyproject.toml` is refused as declared twice.
+- New `[[tool.mpat.override]]` tables assign a scalar upstream attribute from
+  `pyproject.toml`, and new `mpat.apply_overrides()` applies them once per
+  process; that call is the only code an override needs. The target must be an
+  existing attribute of exactly the value's type, `bool` and `int` included.
+  Each override is locked as a watch with `track_value = false`, so `mpat check`
+  is green whether or not the override was applied in that process.
 
 ## 0.2.0
 

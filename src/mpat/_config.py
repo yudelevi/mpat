@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 import tomllib
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -13,14 +13,23 @@ from mpat._errors import MpatError
 PYPROJECT = "pyproject.toml"
 TOOL_SECTION = "mpat"
 WATCH_KEY = "watch"
+OVERRIDE_KEY = "override"
 
 _TARGET = "target"
 _DEPENDS_ON = "depends_on"
 _REVIEW_BY = "review_by"
 _NOTE = "note"
+_VALUE = "value"
+_TOML_SCALARS = (int, float, str, bool)
 _WATCH_FIELDS: dict[str, type | tuple[type, ...]] = {
     _TARGET: str,
     _DEPENDS_ON: list,
+    _REVIEW_BY: date,
+    _NOTE: str,
+}
+_OVERRIDE_FIELDS: dict[str, type | tuple[type, ...]] = {
+    _TARGET: str,
+    _VALUE: _TOML_SCALARS,
     _REVIEW_BY: date,
     _NOTE: str,
 }
@@ -35,16 +44,25 @@ class WatchSpec:
 
 
 @dataclass(frozen=True)
+class OverrideSpec:
+    target: str
+    value: int | float | str | bool
+    note: str = ""
+    review_by: date | None = None
+
+
+@dataclass(frozen=True)
 class Config:
     root: Path
     modules: tuple[str, ...]
     allow: tuple[str, ...]
     declared: bool = False
     watches: tuple[WatchSpec, ...] = ()
+    overrides: tuple[OverrideSpec, ...] = ()
 
     @property
     def declares_anything(self) -> bool:
-        return bool(self.modules or self.watches)
+        return bool(self.modules or self.watches or self.overrides)
 
 
 def find_project_root(start: Path) -> Path | None:
@@ -106,7 +124,19 @@ def _watch_spec(label: str, data: dict[str, Any]) -> WatchSpec:
     )
 
 
-def _unique_targets(specs: tuple[WatchSpec, ...]) -> None:
+def _override_spec(label: str, data: dict[str, Any]) -> OverrideSpec:
+    _typed_fields(OVERRIDE_KEY, label, data, _OVERRIDE_FIELDS)
+    if _VALUE not in data:
+        raise _entry_error(OVERRIDE_KEY, label, f"missing {_VALUE}")
+    return OverrideSpec(
+        target=data[_TARGET],
+        value=data[_VALUE],
+        note=data.get(_NOTE, ""),
+        review_by=data.get(_REVIEW_BY),
+    )
+
+
+def _unique_targets(specs: Sequence[WatchSpec | OverrideSpec]) -> None:
     seen: set[str] = set()
     for spec in specs:
         if spec.target in seen:
@@ -124,13 +154,17 @@ def load_config(start: Path | None = None) -> Config | None:
     tool = data.get("tool", {})
     section = tool.get(TOOL_SECTION, {})
     watches = tuple(_watch_spec(label, entry) for label, entry in _entries(section, WATCH_KEY))
-    _unique_targets(watches)
+    overrides = tuple(
+        _override_spec(label, entry) for label, entry in _entries(section, OVERRIDE_KEY)
+    )
+    _unique_targets((*watches, *overrides))
     return Config(
         root=root,
         modules=tuple(section.get("modules", ())),
         allow=tuple(section.get("allow", ())),
         declared=TOOL_SECTION in tool,
         watches=watches,
+        overrides=overrides,
     )
 
 

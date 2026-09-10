@@ -57,9 +57,9 @@ no_source = false
 | Field | Meaning |
 | --- | --- |
 | `role` | `patch`, `watch` or `depends_on` |
-| `declared_in` | The file the declaration came from, relative to the project root, or `pyproject.toml` for a `[[tool.mpat.watch]]` entry |
+| `declared_in` | The file the declaration came from, relative to the project root, or `pyproject.toml` for a `[[tool.mpat.watch]]` or `[[tool.mpat.override]]` entry |
 | `parent` | Present on `depends_on` entries only, naming the target that declared it |
-| `track_value` | `false` when the target was declared with `watch(..., track_value=False)`; omitted otherwise |
+| `track_value` | `false` when the target was declared with `watch(..., track_value=False)` or as a `[[tool.mpat.override]]`; omitted otherwise |
 | `kind` | `function`, `class`, `attribute` or `module` |
 | `resolved` | Where the target actually resolved to, which is not always where you named it |
 | `is_async` | True for coroutine functions |

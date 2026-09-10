@@ -11,7 +11,13 @@ from typing import Any, Protocol, TypeVar
 
 from mpat import _hooks
 from mpat._config import runtime_config
-from mpat._errors import AlreadyPatched, KindMismatch, UpstreamDriftError, UpstreamDriftWarning
+from mpat._errors import (
+    AlreadyPatched,
+    KindMismatch,
+    UnsupportedTarget,
+    UpstreamDriftError,
+    UpstreamDriftWarning,
+)
 from mpat._fingerprint import OK, compare, fingerprint
 from mpat._lock import runtime_lock
 from mpat._registry import (
@@ -28,7 +34,10 @@ from mpat._registry import (
     Declaration,
     applied_for,
     collect_mode,
+    config_declarations,
     mark_applied,
+    override_originals,
+    record_override,
     register,
 )
 from mpat._targets import (
@@ -255,6 +264,29 @@ def patch(
 def apply_all() -> None:
     """Import every module a `when_imported=True` patch is still waiting on."""
     _hooks.import_pending()
+
+
+def apply_overrides() -> None:
+    """Assign every `[[tool.mpat.override]]` value, once per process."""
+    config = runtime_config()
+    if config is None:
+        return
+    for decl in config_declarations(config):
+        register(decl)
+    if collect_mode():
+        return
+    done = override_originals()
+    for spec in config.overrides:
+        if spec.target in done:
+            continue
+        resolved = resolve(spec.target)
+        if type(resolved.static) is not type(spec.value):
+            raise UnsupportedTarget(
+                f"{spec.target}: override value is {type(spec.value).__name__}, "
+                f"attribute is {type(resolved.static).__name__}"
+            )
+        record_override(spec.target, resolved.static)
+        setattr(resolved.parent, resolved.attr, spec.value)
 
 
 def watch(

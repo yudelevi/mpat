@@ -1,6 +1,6 @@
 """mpat: lockfile-based upstream drift tracking for Python monkeypatches."""
 
-from mpat._api import apply_all, patch, watch
+from mpat._api import apply_all, apply_overrides, patch, watch
 from mpat._errors import (
     AlreadyPatched,
     ForbiddenTarget,
@@ -30,6 +30,7 @@ __all__ = [
     "UpstreamDriftWarning",
     "Version",
     "apply_all",
+    "apply_overrides",
     "patch",
     "watch",
 ]

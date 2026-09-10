@@ -5,8 +5,9 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Any
 
-from mpat._config import PYPROJECT, Config, WatchSpec
+from mpat._config import PYPROJECT, Config, OverrideSpec, WatchSpec
 from mpat._errors import MpatError
 from mpat._targets import check_forbidden
 from mpat._until import Until
@@ -46,6 +47,9 @@ class Declaration:
 
 _declarations: dict[tuple[str, str], Declaration] = {}
 _applied: dict[int, Declaration] = {}
+_override_originals: dict[str, Any] = {}
+
+_OVERRIDE_IDENTITY = "override"
 
 
 def register(decl: Declaration) -> None:
@@ -64,9 +68,18 @@ def applied_for(original_id: int) -> Declaration | None:
     return _applied.get(original_id)
 
 
+def record_override(target: str, original: Any) -> None:
+    _override_originals[target] = original
+
+
+def override_originals() -> dict[str, Any]:
+    return dict(_override_originals)
+
+
 def reset() -> None:
     _declarations.clear()
     _applied.clear()
+    _override_originals.clear()
 
 
 def collect_mode() -> bool:
@@ -98,11 +111,31 @@ def watch_declaration(spec: WatchSpec) -> Declaration:
     )
 
 
+def override_declaration(spec: OverrideSpec) -> Declaration:
+    return Declaration(
+        target=spec.target,
+        role=ROLE_WATCH,
+        depends_on=(),
+        until=None,
+        on_drift=ON_DRIFT_WARN,
+        review_by=spec.review_by,
+        note=spec.note,
+        declared_in=PYPROJECT,
+        identity=(PYPROJECT, f"{_OVERRIDE_IDENTITY}:{spec.target}"),
+        track_value=False,
+    )
+
+
 def config_declarations(config: Config) -> list[Declaration]:
     """Build the declarations pyproject.toml makes, checked against the denylist."""
     for spec in config.watches:
         _check_forbidden(spec.target, spec.depends_on, allow=config.allow)
-    return [watch_declaration(spec) for spec in config.watches]
+    for spec in config.overrides:
+        _check_forbidden(spec.target, (), allow=config.allow)
+    return [
+        *(watch_declaration(spec) for spec in config.watches),
+        *(override_declaration(spec) for spec in config.overrides),
+    ]
 
 
 def _register_config(config: Config) -> None:

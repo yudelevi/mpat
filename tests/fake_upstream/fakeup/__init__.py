@@ -1,7 +1,8 @@
 from fakeup.core import greet as greet_alias
 
-__all__ = ["greet_alias", "LIMIT", "REGISTRY"]
+__all__ = ["greet_alias", "DEBUG", "LIMIT", "REGISTRY"]
 
+DEBUG = False
 LIMIT = 16
 REGISTRY = {"plain": 1}
 

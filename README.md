@@ -204,10 +204,38 @@ note = "protobuf timeout wrapper in data/qdrant.py relies on this shape"
 `target` is required; `depends_on`, `review_by` and `note` mean what they mean
 on `watch()`. The entry is locked with `declared_in = "pyproject.toml"`, the
 denylist applies to it and its `depends_on`, and a malformed entry is a
-configuration error (exit 2) that names the entry. A project can have `modules`,
-`[[tool.mpat.watch]]` entries, or both; a target declared both in code and in
-`pyproject.toml` is refused as declared twice rather than silently merged, so
-there is no precedence to remember.
+configuration error (exit 2) that names the entry.
+
+A patch that only assigns a scalar needs no code either:
+
+```toml
+[[tool.mpat.override]]
+target = "engineio.payload.Payload.max_decode_packets"
+value = 500
+note = "engineio default 16 500s long-polling clients (zauberzeug/nicegui#209)"
+review_by = 2026-12-01
+```
+
+```python
+# the only line the application needs, at startup
+import mpat
+
+mpat.apply_overrides()
+```
+
+`apply_overrides()` assigns every override once per process, after checking
+that the target is an existing attribute of exactly the value's type: `bool`
+is not `int` here, so `value = true` on an int attribute or `value = 1` on a
+bool one raises `UnsupportedTarget`. Each override is also a watch with
+`track_value = false`, so `mpat lock` records that the attribute exists and
+is a scalar, never its value, and `mpat check` is green whether or not the
+override has been applied in that process. A workaround with any logic in it
+is still `@patch`.
+
+A project can have `modules`, `[[tool.mpat.watch]]` and `[[tool.mpat.override]]`
+entries in any combination. A target declared twice, in code and in
+`pyproject.toml` or in both TOML forms, is refused rather than silently
+merged, so there is no precedence to remember.
 
 ## pytest
 

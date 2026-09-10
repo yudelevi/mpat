@@ -7,14 +7,24 @@ from pathlib import Path
 import pytest
 
 from mpat import _registry as reg
-from mpat._config import Config, WatchSpec
+from mpat._config import Config, OverrideSpec, WatchSpec
 from mpat._errors import ForbiddenTarget, MpatError
 
 
 def config(
-    *modules: str, watches: tuple[WatchSpec, ...] = (), allow: tuple[str, ...] = ()
+    *modules: str,
+    watches: tuple[WatchSpec, ...] = (),
+    overrides: tuple[OverrideSpec, ...] = (),
+    allow: tuple[str, ...] = (),
 ) -> Config:
-    return Config(root=Path("/proj"), modules=modules, allow=allow, declared=True, watches=watches)
+    return Config(
+        root=Path("/proj"),
+        modules=modules,
+        allow=allow,
+        declared=True,
+        watches=watches,
+        overrides=overrides,
+    )
 
 
 def decl(target="fakeup.core.greet", identity=("/x.py", "f")):
@@ -140,3 +150,37 @@ def test_config_watch_honours_the_denylist(spec):
 def test_config_watch_allow_list_applies():
     cfg = config(watches=(WatchSpec(target="ssl.SSLContext"),), allow=("ssl.SSLContext",))
     assert [d.target for d in reg.collect_declarations(cfg, apply=False)] == ["ssl.SSLContext"]
+
+
+def test_config_override_registers_an_existence_only_watch():
+    spec = OverrideSpec(target="fakeup.LIMIT", value=500, note="n", review_by=date(2026, 12, 1))
+    result = reg.collect_declarations(config(overrides=(spec,)), apply=False)
+    assert len(result) == 1
+    d = result[0]
+    assert d.role == reg.ROLE_WATCH
+    assert d.track_value is False
+    assert d.depends_on == ()
+    assert d.note == "n"
+    assert d.review_by == date(2026, 12, 1)
+    assert d.declared_in == "pyproject.toml"
+    assert d.identity == ("pyproject.toml", "override:fakeup.LIMIT")
+
+
+def test_config_override_honours_the_denylist():
+    cfg = config(overrides=(OverrideSpec(target="ssl.OP_ALL", value=1),))
+    with pytest.raises(ForbiddenTarget, match="ssl"):
+        reg.collect_declarations(cfg, apply=False)
+
+
+def test_config_override_duplicating_a_code_declaration_raises():
+    reg.register(decl(target="fakeup.LIMIT", identity=("/proj/p.py", "watch:fakeup.LIMIT")))
+    cfg = config(overrides=(OverrideSpec(target="fakeup.LIMIT", value=1),))
+    with pytest.raises(MpatError, match="declared twice"):
+        reg.collect_declarations(cfg, apply=False)
+
+
+def test_override_originals_are_recorded_and_reset():
+    reg.record_override("a.b", 1)
+    assert reg.override_originals() == {"a.b": 1}
+    reg.reset()
+    assert reg.override_originals() == {}

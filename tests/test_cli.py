@@ -292,3 +292,27 @@ def test_empty_config_is_a_usage_error(tmp_path, capsys):
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n[tool.mpat]\n')
     assert _cli.main(["check"]) == _cli.EXIT_USAGE
     assert "nothing to collect" in capsys.readouterr().err
+
+
+OVERRIDE_SECTION = '[tool.mpat]\n[[tool.mpat.override]]\ntarget = "fakeup.LIMIT"\nvalue = 500\n'
+
+
+def test_override_locks_existence_only_and_checks_clean_either_way(tmp_path, upstream, capsys):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n' + OVERRIDE_SECTION)
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    text = _lock.lock_path(tmp_path).read_text()
+    assert "track_value = false" in text
+    assert "value_repr" not in text
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    import mpat
+
+    mpat.apply_overrides()
+    import fakeup
+
+    assert fakeup.LIMIT == 500
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    assert "~ fakeup.LIMIT" not in capsys.readouterr().out
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT_RENAMED = 16")
+    assert _cli.main(["check"]) == _cli.EXIT_DRIFT
+    assert "missing" in capsys.readouterr().out
