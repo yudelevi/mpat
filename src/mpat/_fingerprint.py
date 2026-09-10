@@ -172,7 +172,7 @@ def _signature(obj: Any) -> str | None:
         return None
 
 
-def fingerprint(resolved: Resolved) -> Fingerprint:
+def fingerprint(resolved: Resolved, *, track_value: bool = True) -> Fingerprint:
     obj = resolved.obj
     kind = _kind(obj)
     name = _resolved_name(resolved, kind)
@@ -181,7 +181,7 @@ def fingerprint(resolved: Resolved) -> Fingerprint:
 
     if kind == KIND_ATTRIBUTE:
         raw_target = obj.fget if isinstance(obj, property) else None
-        if isinstance(obj, property):
+        if isinstance(obj, property) or not track_value:
             value_repr = None
         elif isinstance(obj, SCALARS) or (
             isinstance(obj, tuple) and all(isinstance(item, SCALARS) for item in obj)

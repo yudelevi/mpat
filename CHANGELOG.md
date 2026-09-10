@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.2.1
+
+- New `patch(..., when_imported=True)`. The declaration registers without
+  importing the target; the patch is applied by a post-import hook the first
+  time the target's top-level module is imported, or immediately if it already
+  is. This makes optional dependencies patchable: a target whose distribution is
+  not installed no longer raises at declaration, it just never fires.
+  `mpat lock` and `mpat check` are unchanged, so the target still has to be
+  importable when you lock.
+- New `mpat.apply_all()`, which imports every module a `when_imported` patch is
+  still waiting on and so applies them all now.
+- New `watch(..., track_value=False)` records a scalar's existence and kind but not
+  its value. Use it for an upstream setting your application assigns itself,
+  where `mpat lock` sees upstream's default and the pytest plugin sees your
+  override. The lock entry carries `track_value = false` and no `value_repr`, and
+  changing `track_value` on a locked target reports `unlocked` until the next
+  `mpat lock`, like a role or `depends_on` change.
+- Watches can be declared in `pyproject.toml` as `[[tool.mpat.watch]]` tables
+  with `target`, `depends_on`, `review_by` and `note`, so a project with no
+  patch module still gets `mpat lock`, `mpat check` and the pytest items. The
+  entry is locked with `declared_in = "pyproject.toml"`. A target declared
+  both in code and in `pyproject.toml` is refused as declared twice.
+- New `[[tool.mpat.override]]` tables assign a scalar upstream attribute from
+  `pyproject.toml`, and new `mpat.apply_overrides()` applies them once per
+  process; that call is the only code an override needs. The target must be an
+  existing attribute of exactly the value's type, `bool` and `int` included,
+  and it goes through the same drift check as a `watch()` before assignment.
+  Each override is locked as a watch with `track_value = false`, so `mpat check`
+  is green whether or not the override was applied in that process.
+- `watch()` accepts `until`, the same `Version`, `Probe`, `|` and `&` as
+  `patch`. A watch applies nothing, so the condition has no runtime effect; it
+  gives the workaround a generated `still-needed[<target>]` test, which is what
+  a per-instance `setattr` wrapper or an attribute-creation shim needed instead
+  of a hand-written one. `[[tool.mpat.watch]]` entries take `until` as a
+  string: a requirement with a version specifier, or a dotted path to a
+  zero-argument callable that is imported when first evaluated.
+- Fixed: the pytest plugin looked for `[tool.mpat]` only at pytest's rootdir,
+  so in a monorepo with one `pyproject.toml` per service and none at the root,
+  `pytest services/api/tests` from the root silently collected nothing. The
+  plugin now walks up from each directory argument to its nearest
+  `pyproject.toml` and collects one set of items per `[tool.mpat]` it finds,
+  each reading the lockfile next to its own `pyproject.toml`. A project that is
+  not the rootdir's own is collected as `mpat[services/api]::...`; the rootdir's
+  own project keeps the `mpat::...` node ids it had.
+
 ## 0.2.0
 
 - The generated drift tests are now collected by a pytest plugin. Installing

@@ -18,7 +18,10 @@ from mpat._registry import Declaration, collect_declarations
 UNCONFIGURED_TARGET = "<unconfigured>"
 UNCONFIGURED_ROLE = "config"
 UNCONFIGURED_STATUS = "unconfigured"
-UNCONFIGURED_NOTE = "no [tool.mpat] modules found; add modules to pyproject.toml"
+UNCONFIGURED_NOTE = (
+    "[tool.mpat] declares nothing; add modules, [[tool.mpat.watch]] or "
+    "[[tool.mpat.override]] to pyproject.toml"
+)
 
 
 @dataclass(frozen=True)
@@ -39,11 +42,11 @@ def unconfigured_result() -> CheckResult:
 
 def collect(start: Path | None = None) -> Collected | None:
     config = load_config(start)
-    if config is None or not config.modules:
+    if config is None or not config.declares_anything:
         return None
     path = lock_path(config.root)
     return Collected(
-        declarations=collect_declarations(config.modules, apply=True),
+        declarations=collect_declarations(config, apply=True),
         lock=read_lock(path) if path.is_file() else Lock(entries={}),
         root=config.root,
     )
@@ -76,4 +79,4 @@ def drift_message(result: CheckResult) -> str:
 
 
 def still_needed_message(decl: Declaration) -> str:
-    return f"{decl.target}: upstream fixed, delete this patch. {decl.note}".rstrip()
+    return f"{decl.target}: upstream fixed, delete this {decl.role}. {decl.note}".rstrip()

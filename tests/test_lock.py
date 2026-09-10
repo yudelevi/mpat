@@ -15,7 +15,14 @@ TODAY = date(2026, 9, 9)
 
 
 def decl(
-    target, *, role=ROLE_PATCH, depends_on=(), review_by=None, note="", declared_in="/proj/src/p.py"
+    target,
+    *,
+    role=ROLE_PATCH,
+    depends_on=(),
+    review_by=None,
+    note="",
+    declared_in="/proj/src/p.py",
+    track_value=True,
 ):
     return Declaration(
         target=target,
@@ -27,6 +34,7 @@ def decl(
         note=note,
         declared_in=declared_in,
         identity=(declared_in, target),
+        track_value=track_value,
     )
 
 
@@ -350,3 +358,71 @@ def test_shared_dependency_locks_and_checks_once(upstream, tmp_path):
     ]
     assert len(results) == 1
     assert (results[0].status, results[0].role) == (fp.OK, ROLE_DEPENDS)
+
+
+def test_track_value_false_entry_roundtrips_without_value_repr(upstream, tmp_path):
+    root = project(tmp_path)
+    lock = _lock.build_lock([decl("fakeup.LIMIT", role=ROLE_WATCH, track_value=False)], root=root)
+    entry = lock.entries["fakeup.LIMIT"]
+    assert entry.track_value is False
+    assert entry.fingerprint.value_repr is None
+    assert entry.fingerprint.kind == fp.KIND_ATTRIBUTE
+    path = _lock.lock_path(root)
+    _lock.write_lock(path, lock)
+    text = path.read_text()
+    assert "track_value = false" in text
+    assert "value_repr" not in text
+    assert _lock.read_lock(path) == lock
+
+
+def test_default_entry_omits_track_value_flag(upstream, tmp_path):
+    root = project(tmp_path)
+    lock = _lock.build_lock([decl("fakeup.LIMIT", role=ROLE_WATCH)], root=root)
+    assert lock.entries["fakeup.LIMIT"].track_value is True
+    path = _lock.lock_path(root)
+    _lock.write_lock(path, lock)
+    assert "track_value = " not in path.read_text()
+    assert 'value_repr = "16"' in path.read_text()
+
+
+def test_check_value_false_ignores_value_but_reports_missing(upstream, tmp_path):
+    root = project(tmp_path)
+    decls = [decl("fakeup.LIMIT", role=ROLE_WATCH, track_value=False)]
+    lock = _lock.build_lock(decls, root=root)
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 17")
+    assert statuses(_lock.check(decls, lock, root=root, today=TODAY)) == {"fakeup.LIMIT": fp.OK}
+    upstream.edit("__init__.py", "LIMIT = 17", "LIMIT_RENAMED = 17")
+    assert statuses(_lock.check(decls, lock, root=root, today=TODAY)) == {
+        "fakeup.LIMIT": _lock.MISSING
+    }
+
+
+def test_track_value_false_does_not_leak_into_depends_on(upstream, tmp_path):
+    root = project(tmp_path)
+    decls = [
+        decl("fakeup.core.Store", role=ROLE_WATCH, depends_on=["fakeup.LIMIT"], track_value=False)
+    ]
+    lock = _lock.build_lock(decls, root=root)
+    assert lock.entries["fakeup.LIMIT"].track_value is True
+    assert lock.entries["fakeup.LIMIT"].fingerprint.value_repr == "16"
+
+
+def test_track_value_option_change_reports_unlocked(upstream, tmp_path):
+    root = project(tmp_path)
+    locked = _lock.build_lock([decl("fakeup.LIMIT", role=ROLE_WATCH)], root=root)
+    now = [decl("fakeup.LIMIT", role=ROLE_WATCH, track_value=False)]
+    assert statuses(_lock.check(now, locked, root=root, today=TODAY)) == {
+        "fakeup.LIMIT": _lock.UNLOCKED
+    }
+    locked = _lock.build_lock(now, root=root)
+    back = [decl("fakeup.LIMIT", role=ROLE_WATCH)]
+    assert statuses(_lock.check(back, locked, root=root, today=TODAY)) == {
+        "fakeup.LIMIT": _lock.UNLOCKED
+    }
+
+
+def test_read_rejects_non_bool_track_value(tmp_path):
+    path = tmp_path / "mpat.lock"
+    write_entry(path, track_value='"no"')
+    with pytest.raises(LockError, match="track_value"):
+        _lock.read_lock(path)

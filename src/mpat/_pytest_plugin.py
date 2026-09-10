@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from mpat._config import load_config
+from mpat._config import Config, load_config
 from mpat._generated import (
     Collected,
     collect,
@@ -46,7 +47,14 @@ TESTING_MODULE = "mpat.testing"
 NODEID_SEPARATOR = "::"
 EXPLICIT_TEST = "test_upstream_drift"
 
-_collected_key: pytest.StashKey[Collected | None] = pytest.StashKey()
+_projects_key: pytest.StashKey[list[Project]] = pytest.StashKey()
+_collected_key: pytest.StashKey[dict[Path, Collected | None]] = pytest.StashKey()
+
+
+@dataclasses.dataclass(frozen=True)
+class Project:
+    name: str
+    root: Path
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -66,15 +74,44 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    if _active(config):
+    config.stash[_projects_key] = _enabled_projects(config)
+    if config.stash[_projects_key]:
         config.addinivalue_line("markers", MARKER_HELP)
 
 
-def _active(config: pytest.Config) -> bool:
+def _enabled_projects(config: pytest.Config) -> list[Project]:
     if config.getoption(DISABLE_DEST) or not config.getini(INI_NAME):
-        return False
-    mpat_config = load_config(config.rootpath)
-    return mpat_config is not None and mpat_config.declared
+        return []
+    return _declared_projects(config)
+
+
+def _argument_paths(config: pytest.Config) -> list[Path]:
+    return [config.invocation_params.dir / arg.split(NODEID_SEPARATOR, 1)[0] for arg in config.args]
+
+
+def _declared_projects(config: pytest.Config) -> list[Project]:
+    """The rootdir's own project keeps the bare `mpat` name so its node ids do not
+    change; each other project the positional arguments walk up to gets one too."""
+    rootdir_config = load_config(config.rootpath)
+    projects: dict[Path, Project] = {}
+    for start in (config.rootpath, *_argument_paths(config)):
+        mpat_config = load_config(start)
+        if mpat_config is None or not mpat_config.declared or mpat_config.root in projects:
+            continue
+        name = (
+            COLLECTOR_NAME
+            if mpat_config == rootdir_config
+            else f"{COLLECTOR_NAME}[{_label(config, mpat_config)}]"
+        )
+        projects[mpat_config.root] = Project(name=name, root=mpat_config.root)
+    return list(projects.values())
+
+
+def _label(config: pytest.Config, mpat_config: Config) -> str:
+    try:
+        return mpat_config.root.relative_to(config.rootpath).as_posix()
+    except ValueError:
+        return mpat_config.root.as_posix()
 
 
 def _only_directories_requested(config: pytest.Config) -> bool:
@@ -93,19 +130,39 @@ def _explicit_tests_collected(items: Sequence[pytest.Item]) -> bool:
     return any(isinstance(i, pytest.Function) and i.function is explicit for i in items)
 
 
-def _collected(session: pytest.Session) -> Collected | None:
-    if _collected_key not in session.stash:
-        session.stash[_collected_key] = collect(session.config.rootpath)
-    return session.stash[_collected_key]
+def _owner(decl: Declaration, roots: Sequence[Path]) -> Path | None:
+    declared_in = Path(decl.declared_in).resolve()
+    owners = sorted(
+        (root for root in roots if declared_in.is_relative_to(root.resolve())),
+        key=lambda root: len(root.parts),
+    )
+    return owners[-1] if owners else None
+
+
+def _scoped(collected: Collected, roots: Sequence[Path]) -> Collected:
+    """With several configs in one process the registry is shared, so a collector
+    keeps only the declarations under its own root, plus any under none of them."""
+    declarations = [d for d in collected.declarations if _owner(d, roots) in (None, collected.root)]
+    return dataclasses.replace(collected, declarations=declarations)
+
+
+def _collected(session: pytest.Session, root: Path) -> Collected | None:
+    cache = session.stash.setdefault(_collected_key, {})
+    if root not in cache:
+        collected = collect(root)
+        roots = [p.root for p in session.config.stash[_projects_key]]
+        cache[root] = None if collected is None else _scoped(collected, roots)
+    return cache[root]
 
 
 class MpatItem(pytest.Item):
-    def __init__(self, *, name: str, parent: pytest.Collector) -> None:
+    def __init__(self, *, name: str, parent: pytest.Collector, root: Path) -> None:
         super().__init__(name=name, parent=parent)
+        self.root = root
         self.add_marker(MARKER)
 
     def reportinfo(self) -> tuple[Path, int, str]:
-        return lock_path(self.config.rootpath), 0, self.name
+        return lock_path(self.root), 0, self.name
 
     def repr_failure(
         self, excinfo: pytest.ExceptionInfo[BaseException], style: TracebackStyle | None = None
@@ -116,8 +173,10 @@ class MpatItem(pytest.Item):
 
 
 class DriftItem(MpatItem):
-    def __init__(self, *, name: str, parent: pytest.Collector, result: CheckResult) -> None:
-        super().__init__(name=name, parent=parent)
+    def __init__(
+        self, *, name: str, parent: pytest.Collector, root: Path, result: CheckResult
+    ) -> None:
+        super().__init__(name=name, parent=parent, root=root)
         self.result = result
 
     def runtest(self) -> None:
@@ -125,8 +184,10 @@ class DriftItem(MpatItem):
 
 
 class StillNeededItem(MpatItem):
-    def __init__(self, *, name: str, parent: pytest.Collector, decl: Declaration) -> None:
-        super().__init__(name=name, parent=parent)
+    def __init__(
+        self, *, name: str, parent: pytest.Collector, root: Path, decl: Declaration
+    ) -> None:
+        super().__init__(name=name, parent=parent, root=root)
         self.decl = decl
 
     def runtest(self) -> None:
@@ -135,18 +196,26 @@ class StillNeededItem(MpatItem):
 
 
 class MpatCollector(pytest.Collector):
+    def __init__(self, *, name: str, parent: pytest.Session, nodeid: str, root: Path) -> None:
+        super().__init__(name=name, parent=parent, nodeid=nodeid)
+        self.root = root
+
     def collect(self) -> Iterable[pytest.Item]:
-        collected = _collected(self.session)
+        collected = _collected(self.session, self.root)
         if collected is None:
             return [
-                DriftItem.from_parent(self, name=UNCONFIGURED_NAME, result=unconfigured_result())
+                DriftItem.from_parent(
+                    self, name=UNCONFIGURED_NAME, root=self.root, result=unconfigured_result()
+                )
             ]
         items: list[pytest.Item] = [
-            DriftItem.from_parent(self, name=f"{DRIFT_NAME}[{r.target}]", result=r)
+            DriftItem.from_parent(self, name=f"{DRIFT_NAME}[{r.target}]", root=self.root, result=r)
             for r in sorted(results_for(collected), key=lambda r: r.target)
         ]
         items.extend(
-            StillNeededItem.from_parent(self, name=f"{STILL_NEEDED_NAME}[{d.target}]", decl=d)
+            StillNeededItem.from_parent(
+                self, name=f"{STILL_NEEDED_NAME}[{d.target}]", root=self.root, decl=d
+            )
             for d in sorted(until_for(collected), key=lambda d: d.target)
         )
         return items
@@ -157,16 +226,19 @@ def pytest_collection_modifyitems(
     session: pytest.Session, config: pytest.Config, items: list[pytest.Item]
 ) -> None:
     if (
-        not _active(config)
+        not config.stash[_projects_key]
         or not _only_directories_requested(config)
         or _explicit_tests_collected(items)
     ):
         return
-    collector = MpatCollector.from_parent(session, name=COLLECTOR_NAME, nodeid=COLLECTOR_NAME)
-    if collect_one_node is None:
-        items.extend(collector.collect())
-        return
-    report = collect_one_node(collector)
-    session.ihook.pytest_collectreport(report=report)
-    if report.passed:
-        items.extend(node for node in report.result if isinstance(node, pytest.Item))
+    for project in config.stash[_projects_key]:
+        collector = MpatCollector.from_parent(
+            session, name=project.name, nodeid=project.name, root=project.root
+        )
+        if collect_one_node is None:
+            items.extend(collector.collect())
+            continue
+        report = collect_one_node(collector)
+        session.ihook.pytest_collectreport(report=report)
+        if report.passed:
+            items.extend(node for node in report.result if isinstance(node, pytest.Item))

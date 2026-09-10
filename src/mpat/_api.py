@@ -9,15 +9,24 @@ from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from datetime import date
 from typing import Any, Protocol, TypeVar
 
+from mpat import _hooks
 from mpat._config import runtime_config
-from mpat._errors import AlreadyPatched, KindMismatch, UpstreamDriftError, UpstreamDriftWarning
+from mpat._errors import (
+    AlreadyPatched,
+    KindMismatch,
+    UnsupportedTarget,
+    UpstreamDriftError,
+    UpstreamDriftWarning,
+)
 from mpat._fingerprint import OK, compare, fingerprint
 from mpat._lock import runtime_lock
 from mpat._registry import (
     ENV_ON,
+    ON_DRIFT_WARN,
     ROLE_PATCH,
     ROLE_WATCH,
     STATUS_APPLIED,
+    STATUS_DEFERRED,
     STATUS_SKIPPED_DRIFT,
     STATUS_SKIPPED_UNTIL,
     STATUS_WATCHED,
@@ -25,7 +34,10 @@ from mpat._registry import (
     Declaration,
     applied_for,
     collect_mode,
+    config_declarations,
     mark_applied,
+    override_originals,
+    record_override,
     register,
 )
 from mpat._targets import (
@@ -41,7 +53,6 @@ from mpat._targets import (
 )
 from mpat._until import Until
 
-ON_DRIFT_WARN = "warn"
 ON_DRIFT_SKIP = "skip"
 ON_DRIFT_RAISE = "raise"
 ON_DRIFT_VALUES = (ON_DRIFT_WARN, ON_DRIFT_SKIP, ON_DRIFT_RAISE)
@@ -85,7 +96,10 @@ def _drift_status(decl: Declaration, resolved: Resolved) -> str:
     lock = runtime_lock()
     if lock is None or decl.target not in lock.entries:
         return OK
-    return compare(locked=lock.entries[decl.target].fingerprint, current=fingerprint(resolved))
+    return compare(
+        locked=lock.entries[decl.target].fingerprint,
+        current=fingerprint(resolved, track_value=decl.track_value),
+    )
 
 
 def _handle_drift(decl: Declaration, resolved: Resolved) -> bool:
@@ -161,6 +175,46 @@ def _wrap(fn: Callable[..., Any], original: Any, decl: Declaration) -> Callable[
     return wrapper
 
 
+def _check_kind(fn: Replacement, resolved: Resolved) -> None:
+    if callable_kind(fn) != callable_kind(resolved.obj):
+        raise KindMismatch(
+            f"{resolved.target}: original is {callable_kind(resolved.obj)}, "
+            f"replacement is {callable_kind(fn)}"
+        )
+
+
+def _resolve_patchable(canonical: str) -> Resolved:
+    resolved = resolve(canonical)
+    check_supported(resolved)
+    return resolved
+
+
+def _apply(*, decl: Declaration, fn: Replacement, resolved: Resolved) -> None:
+    if decl.until is not None and decl.until():
+        decl.status = STATUS_SKIPPED_UNTIL
+        log.info("%s: not applied, until=%r is satisfied. %s", decl.target, decl.until, decl.note)
+        return
+    if not _handle_drift(decl, resolved):
+        decl.status = STATUS_SKIPPED_DRIFT
+        return
+    original = _live_original(resolved, decl)
+    wrapper = _wrap(fn=fn, original=original, decl=decl)
+    replacement = resolved.descriptor(wrapper) if resolved.descriptor else wrapper
+    setattr(resolved.parent, resolved.attr, replacement)
+    mark_applied(id(original), decl)
+    decl.status = STATUS_APPLIED
+
+
+def _apply_deferred(*, decl: Declaration, fn: Replacement) -> None:
+    resolved = _resolve_patchable(decl.target)
+    _check_kind(fn, resolved)
+    _apply(decl=decl, fn=fn, resolved=resolved)
+
+
+def _top_level(canonical: str) -> str:
+    return canonical.partition(".")[0]
+
+
 def patch(
     target: str | object,
     *,
@@ -169,21 +223,18 @@ def patch(
     on_drift: str = ON_DRIFT_WARN,
     review_by: date | None = None,
     note: str = "",
+    when_imported: bool = False,
 ) -> Callable[[F], F]:
     if on_drift not in ON_DRIFT_VALUES:
         raise ValueError(f"on_drift must be one of {ON_DRIFT_VALUES}, got {on_drift!r}")
     canonical = canonical_target(target)
     _check_declaration_forbidden(canonical, depends_on)
-    resolved = resolve(canonical)
-    check_supported(resolved)
+    resolved = None if when_imported else _resolve_patchable(canonical)
     declared_in = _caller_file()
 
     def decorator(fn: F) -> F:
-        if callable_kind(fn) != callable_kind(resolved.obj):
-            raise KindMismatch(
-                f"{canonical}: original is {callable_kind(resolved.obj)}, "
-                f"replacement is {callable_kind(fn)}"
-            )
+        if resolved is not None:
+            _check_kind(fn, resolved)
         decl = Declaration(
             target=canonical,
             role=ROLE_PATCH,
@@ -198,30 +249,57 @@ def patch(
         register(decl)
         if collect_mode():
             return fn
-        if until is not None and until():
-            decl.status = STATUS_SKIPPED_UNTIL
-            log.info("%s: not applied, until=%r is satisfied. %s", canonical, until, note)
+        if resolved is not None:
+            _apply(decl=decl, fn=fn, resolved=resolved)
             return fn
-        if not _handle_drift(decl, resolved):
-            decl.status = STATUS_SKIPPED_DRIFT
-            return fn
-        original = _live_original(resolved, decl)
-        wrapper = _wrap(fn=fn, original=original, decl=decl)
-        replacement = resolved.descriptor(wrapper) if resolved.descriptor else wrapper
-        setattr(resolved.parent, resolved.attr, replacement)
-        mark_applied(id(original), decl)
-        decl.status = STATUS_APPLIED
+        decl.status = STATUS_DEFERRED
+        _hooks.when_imported(
+            _top_level(canonical), functools.partial(_apply_deferred, decl=decl, fn=fn)
+        )
         return fn
 
     return decorator
+
+
+def apply_all() -> None:
+    """Import every module a `when_imported=True` patch is still waiting on."""
+    _hooks.import_pending()
+
+
+def apply_overrides() -> None:
+    """Assign every `[[tool.mpat.override]]` value, once per process."""
+    config = runtime_config()
+    if config is None:
+        return
+    declarations = config_declarations(config)
+    for decl in declarations:
+        register(decl)
+    if collect_mode():
+        return
+    done = override_originals()
+    by_target = {decl.target: decl for decl in declarations}
+    for spec in config.overrides:
+        if spec.target in done:
+            continue
+        resolved = resolve(spec.target)
+        _handle_drift(by_target[spec.target], resolved)
+        if type(resolved.static) is not type(spec.value):
+            raise UnsupportedTarget(
+                f"{spec.target}: override value is {type(spec.value).__name__}, "
+                f"attribute is {type(resolved.static).__name__}"
+            )
+        record_override(spec.target, resolved.static)
+        setattr(resolved.parent, resolved.attr, spec.value)
 
 
 def watch(
     target: str | object,
     *,
     depends_on: Sequence[str] = (),
+    until: Until | None = None,
     review_by: date | None = None,
     note: str = "",
+    track_value: bool = True,
 ) -> None:
     canonical = canonical_target(target)
     _check_declaration_forbidden(canonical, depends_on)
@@ -231,12 +309,13 @@ def watch(
         target=canonical,
         role=ROLE_WATCH,
         depends_on=tuple(depends_on),
-        until=None,
+        until=until,
         on_drift=ON_DRIFT_WARN,
         review_by=review_by,
         note=note,
         declared_in=declared_in,
         identity=(declared_in, f"watch:{canonical}"),
+        track_value=track_value,
     )
     register(decl)
     if collect_mode():

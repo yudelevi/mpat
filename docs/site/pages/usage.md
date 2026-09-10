@@ -3,7 +3,7 @@
 Everything public lives at the top of the package.
 
 ```python
-from mpat import Probe, Until, Version, patch, watch
+from mpat import Probe, Until, Version, apply_all, apply_overrides, patch, watch
 ```
 
 ## `patch()`
@@ -17,6 +17,7 @@ def patch(
     on_drift: str = "warn",
     review_by: date | None = None,
     note: str = "",
+    when_imported: bool = False,
 ) -> Callable[[F], F]
 ```
 
@@ -43,6 +44,31 @@ not double-wrap.
 A replacement must be the same kind of callable as the original: sync for sync,
 async for async, generator for generator, async generator for async generator.
 
+By default the decorator imports the target when it runs. Pass
+[`when_imported=True`](#when_imported) to apply the patch on the target's first
+import instead.
+
+## `apply_all()`
+
+```python
+def apply_all() -> None
+```
+
+Imports every module a `when_imported=True` patch is still waiting on, which
+applies those patches now. Call it from a startup path that wants every patch in
+place before the first request, at the cost of importing the optional
+dependencies eagerly. A module that is not installed raises
+`ModuleNotFoundError` from here, exactly as `import` would.
+
+## `apply_overrides()`
+
+```python
+def apply_overrides() -> None
+```
+
+Assigns every [`[[tool.mpat.override]]`](#overrides) value from the nearest
+`pyproject.toml`, once per process. With no `pyproject.toml` it does nothing.
+
 ## `watch()`
 
 ```python
@@ -50,8 +76,10 @@ def watch(
     target: str | object,
     *,
     depends_on: Sequence[str] = (),
+    until: Until | None = None,
     review_by: date | None = None,
     note: str = "",
+    track_value: bool = True,
 ) -> None
 ```
 
@@ -64,9 +92,139 @@ from mpat import watch
 watch("somelib.settings.MAX_RETRIES", note="see somelib#98")
 ```
 
-`watch` takes no `until` and no `on_drift`. A watched target that drifts always
-warns, and `MPAT_STRICT=1` turns that warning into an error like it does for a
-patch.
+`track_value=False` records that a scalar exists and what kind of thing it is, but not
+what it is set to. Use it for a setting your application assigns itself:
+
+```python
+import litellm
+from mpat import watch
+
+watch("litellm.drop_params", track_value=False, note="we set this in app.config")
+```
+
+The lock then carries `track_value = false` and no `value_repr`, so only a rename,
+removal or a change of kind is reported. Without it the value is unstable:
+`mpat lock` imports only `[tool.mpat] modules` and records upstream's default,
+while the pytest plugin runs after your application has imported and sees your
+override, so CI stays red no matter which one you lock.
+
+When you do want the value pinned, put the assignment and the `watch()` in the
+same module so both `mpat lock` and the test run see the same thing:
+
+```python
+import litellm
+from mpat import watch
+
+litellm.drop_params = True
+watch("litellm.drop_params", note="litellm#1234")
+```
+
+Switching `track_value` on an already locked target reports `unlocked` from
+`mpat check` until you run `mpat lock` again, the same as changing a target's
+role or `depends_on`.
+
+`watch` takes no `on_drift`. A watched target that drifts always warns, and
+`MPAT_STRICT=1` turns that warning into an error like it does for a patch.
+
+`watch` does take [`until`](#until). A watch applies nothing, so the condition
+changes nothing at runtime; it exists to give the workaround a generated
+`still-needed[<target>]` test, for the cases `patch` cannot express, such as a
+per-instance `setattr` wrapper or an attribute your code creates on an upstream
+object:
+
+```python
+from mpat import Probe, Version, watch
+
+
+def ontospy_still_needs_shim() -> bool:
+    return not hasattr(Ontospy, "namespaces")
+
+
+watch(
+    "ontospy.core.ontospy.Ontospy",
+    until=Version("ontospy>=2.2") | Probe(ontospy_still_needs_shim),
+    note="data/upstream_shims.py adds .namespaces; see ontospy#120",
+)
+```
+
+## Declaring in `pyproject.toml`
+
+A watch does not need a Python module. `[[tool.mpat.watch]]` declares one in
+the same `[tool.mpat]` section that lists your modules:
+
+```toml
+[[tool.mpat.watch]]
+target = "qdrant_client.async_qdrant_remote.AsyncQdrantRemote.query_points"
+depends_on = ["qdrant_client.async_qdrant_remote.AsyncQdrantRemote.scroll"]
+review_by = 2026-12-01
+note = "protobuf timeout wrapper in data/qdrant.py relies on this shape"
+```
+
+`target` is required. `depends_on`, `until`, `review_by` and `note` are
+optional and mean what they mean on [`watch()`](#watch); `review_by` is a bare
+TOML date. `until` is a string in one of two forms:
+
+```toml
+until = "ontospy>=2.2"                                  # Version
+until = "data.upstream_shims.ontospy_still_needs_shim"  # Probe
+```
+
+A requirement with a version specifier becomes `Version`. A dotted path
+becomes a `Probe` around the zero-argument callable it names, imported when
+the condition is first evaluated, so the configuration can be read without
+importing your application. Anything else is a configuration error.
+Any other key, or a key of the wrong type, is a configuration error that names
+the entry.
+
+`mpat lock`, `mpat check` and the pytest plugin register these after importing
+`[tool.mpat] modules`, so a project can have either or both. The lock entry
+carries `declared_in = "pyproject.toml"`. The target is resolved when it is
+locked or checked, not when the configuration is read, and the denylist applies
+to it and to its `depends_on` the same as in code.
+
+### Overrides
+
+A patch whose whole job is to assign a scalar is an `[[tool.mpat.override]]`
+entry:
+
+```toml
+[[tool.mpat.override]]
+target = "engineio.payload.Payload.max_decode_packets"
+value = 500
+note = "engineio default 16 500s long-polling clients (zauberzeug/nicegui#209)"
+review_by = 2026-12-01
+```
+
+`target` and `value` are required; `value` is a TOML integer, float, string
+or boolean. `note` and `review_by` are optional. The application applies them
+with one call at startup, which is the only code an override needs:
+
+```python
+import mpat
+
+mpat.apply_overrides()
+```
+
+For each entry `apply_overrides()` resolves the target, checks that the
+attribute exists and has exactly the value's type, records the previous value,
+and assigns. `bool` is a subclass of `int` in Python but not here: `value = true`
+on an int attribute and `value = 1` on a bool attribute both raise
+`UnsupportedTarget`, as does a value of the wrong type on a function, a
+property or a dict. A second call in the same process assigns nothing. Under
+`MPAT_COLLECT=1` nothing is assigned either, so `mpat lock` and `mpat check`
+never touch the live object. The denylist applies.
+
+An override is also a watch with `track_value=False`: the lock records that the
+attribute exists and what kind of thing it is, never its value, so `mpat lock`
+in a fresh process and the pytest plugin after `apply_overrides()` has run
+agree. A rename or removal upstream still reports `missing`. A workaround with
+any logic in it is still a [`patch`](#patch).
+
+### One declaration per target
+
+A target declared twice, in code and in `pyproject.toml` or in both a `watch`
+and an `override` entry, is refused, naming both places. Delete one of them;
+there is no precedence.
 
 ## Targets
 
@@ -158,9 +316,9 @@ It does not affect whether the patch is applied at import.
 
 ### `until`
 
-A condition that says when the patch is no longer needed. If it evaluates true at
-import, the patch is not applied and a message is logged at info level on the
-`mpat` logger.
+A condition that says when the workaround is no longer needed. On a `patch`, if
+it evaluates true at import, the patch is not applied and a message is logged
+at info level on the `mpat` logger. On a `watch` it has no runtime effect.
 
 `Version` takes a requirement string in the usual packaging syntax. It is false
 when the distribution is not installed at all.
@@ -194,9 +352,9 @@ until = Version("somelib>=2.4") & Version("otherlib>=1.2")
 `Until` is the protocol both satisfy: any zero-argument callable returning a bool
 works, but only `Version`, `Probe` and their combinations support the operators.
 
-A patch with `until` also gets a generated test that fails once the condition
-comes true, so the branch that deletes the patch is the one that goes green. See
-[pytest](pytest.md).
+A patch or watch with `until` also gets a generated test that fails once the
+condition comes true, so the branch that deletes the workaround is the one that
+goes green. See [pytest](pytest.md).
 
 ### `on_drift`
 
@@ -227,6 +385,46 @@ compared and the patch is applied.
 
 `until` is evaluated before the drift check. A patch that is already unnecessary
 does not warn about drift.
+
+### `when_imported`
+
+By default `patch` imports the target's module when the decorator runs, so a
+patch on an optional dependency raises `ModuleNotFoundError` on any machine
+without it. `when_imported=True` registers the declaration without importing
+anything and applies the patch from a post-import hook the first time the
+target's top-level module is imported.
+
+```python
+@patch("optionallib.Client.request", when_imported=True)
+def request(original, self, *args, **kwargs): ...
+```
+
+If the top-level module is already imported when the decorator runs, the patch
+is applied immediately. If it is never imported, nothing happens. Everything the
+eager form checks at decoration, the deferred form checks when the hook fires:
+`TargetNotFound`, `UnsupportedTarget`, `KindMismatch`, `until`, and the drift
+check with its `on_drift` behaviour. An error from those propagates out of the
+`import` statement that triggered the hook, and the hook stays queued, so the
+next attempt to import the module runs it again.
+
+The hook keys on the first dotted segment of the target, `optionallib` above,
+because that is the only module name that can be known without importing.
+Importing `optionallib.client` imports `optionallib` first, so the hook fires
+either way; resolving the target then imports the submodule it lives in.
+
+The hook is a finder at the front of `sys.meta_path`. It only claims module
+names a deferred patch is waiting on, hands the real loader back to the module
+before executing it, and removes itself from the module's entry once fired, so
+`module.__loader__` and `module.__spec__` look exactly as they would without
+`mpat`.
+
+`mpat lock` and `mpat check` do not defer. They import the patch modules with
+`MPAT_COLLECT=1`, which registers the declaration and nothing else, and then
+resolve every target to fingerprint it. A deferred target therefore still has to
+be importable when you lock.
+
+`apply_all()` imports every pending module, for code that wants the patches
+applied before it proceeds.
 
 ### `review_by`
 

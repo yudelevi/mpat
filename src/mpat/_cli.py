@@ -69,8 +69,11 @@ def _require_config() -> Config:
     config = load_config()
     if config is None:
         raise MpatError("no pyproject.toml found in the current directory or its parents")
-    if not config.modules:
-        raise MpatError("[tool.mpat] modules is empty in pyproject.toml; nothing to collect")
+    if not config.declares_anything:
+        raise MpatError(
+            "[tool.mpat] in pyproject.toml lists no modules and no watch entries; "
+            "nothing to collect"
+        )
     return config
 
 
@@ -100,7 +103,7 @@ def _lock_to_replace(root: Path) -> Lock:
 
 def cmd_lock(_: argparse.Namespace) -> int:
     config = _require_config()
-    declarations = collect_declarations(config.modules, apply=False)
+    declarations = collect_declarations(config, apply=False)
     new = build_lock(declarations, root=config.root)
     _print_lock_diff(_lock_to_replace(config.root), new)
     write_lock(lock_path(config.root), new)
@@ -153,7 +156,7 @@ def _print_table(results: Sequence[CheckResult]) -> None:
 
 def cmd_check(args: argparse.Namespace) -> int:
     config = _require_config()
-    declarations = collect_declarations(config.modules, apply=False)
+    declarations = collect_declarations(config, apply=False)
     results = check(
         declarations,
         _existing_lock(config.root),

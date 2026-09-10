@@ -57,7 +57,7 @@ def test_unconfigured_project_fails_loudly(pytester):
     )
     result = pytester.runpytest("test_generated.py", "-p", "no:cacheprovider")
     result.assert_outcomes(failed=1, skipped=1)
-    result.stdout.fnmatch_lines(["*no [[]tool.mpat[]] modules found*"])
+    result.stdout.fnmatch_lines(["*[[]tool.mpat[]] declares nothing*"])
 
 
 def test_generated_module_leaves_patches_applied(pytester, upstream, monkeypatch):

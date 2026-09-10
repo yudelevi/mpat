@@ -42,6 +42,28 @@ Directories include the ones `testpaths` supplies, so a project with
 are ordered by target rather than by the order your patch modules happen to
 import, so every worker collects the same list.
 
+## Monorepos
+
+The plugin finds `[tool.mpat]` by walking up from each directory you pass, not
+only from pytest's rootdir. In a repository with one `pyproject.toml` per
+service and none at the root, `pytest services/api/tests` run from the root
+collects the api service's items, and `pytest services/api/tests
+services/web/tests` collects both sets. Each service reads its own `mpat.lock`.
+
+When the project is not the rootdir's own, its collector is named after the
+directory, so the two sets never share a node id:
+
+```
+mpat[services/api]::drift[somelib.client.Client.request] PASSED
+mpat[services/web]::drift[otherlib.Session.open] PASSED
+```
+
+A project whose `pyproject.toml` is the rootdir's keeps the plain `mpat::` name,
+and is collected whenever the arguments are directories, as before. Nothing
+below the rootdir is scanned for you: a bare `pytest` at a root with no
+`[tool.mpat]` collects no items, so set `testpaths` to the service test
+directories if you want a bare `pytest` to cover them.
+
 ## `drift[...]`
 
 One item per declared target, per `depends_on` entry, and per lockfile entry that
@@ -58,8 +80,8 @@ declaration's `note`. See [the status table](cli.md#statuses).
 
 ## `still-needed[...]`
 
-One item per patch that has an `until`. It fails once the condition comes true,
-which is the point at which the patch should be deleted.
+One item per patch or watch that has an `until`. It fails once the condition
+comes true, which is the point at which the workaround should be deleted.
 
 ```
 FAILED mpat::still-needed[somelib.client.Client.request]
@@ -67,17 +89,19 @@ FAILED mpat::still-needed[somelib.client.Client.request]
     Works around somelib#123.
 ```
 
-Patches with no `until` produce no item here.
+The message names the role, `patch` or `watch`, so a failing item for a watch
+reads `upstream fixed, delete this watch`. Declarations with no `until` produce
+no item here.
 
 ## The unconfigured case
 
-A project with `[tool.mpat]` and an empty `modules` collects one item, and it
-fails:
+A project with `[tool.mpat]` but no `modules` and no `[[tool.mpat.watch]]`
+entries collects one item, and it fails:
 
 ```
 FAILED mpat::unconfigured
   <unconfigured>: unconfigured.
-    no [tool.mpat] modules found; add modules to pyproject.toml
+    [tool.mpat] declares nothing; add modules, [[tool.mpat.watch]] or [[tool.mpat.override]] to pyproject.toml
 ```
 
 It fails rather than skipping on purpose. A typo in the module list would
@@ -119,7 +143,9 @@ collection time, once per session. They are imported normally, not in the
 collect-only mode `mpat check` uses, so the patches apply and stay applied for
 the rest of the session. That is deliberate: a module imported with its patches
 suppressed would be cached that way, and every later test expecting patched
-behaviour would see pristine upstream instead.
+behaviour would see pristine upstream instead. A `when_imported=True` patch is
+applied during collection too, because fingerprinting its target imports the
+module the patch is waiting on.
 
 ## pre-commit
 

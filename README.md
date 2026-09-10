@@ -57,16 +57,52 @@ patching. It tracks the body of functions and classes, the getter of a
 property, and the value of scalar constants and tuples of scalars. Every other
 attribute, including dicts, lists and custom descriptors, is recorded as
 existence only, so mutating a watched registry's contents will not fail
-`mpat check`; watch the function or class that populates it instead. `until`
-turns the patch off once upstream is fixed; `Version` takes a requirement
-string, `Probe` takes a zero-argument callable, and both combine with `|` and
-`&`. `review_by` is a nag date only. `on_drift="warn" | "skip" | "raise"`
+`mpat check`; watch the function or class that populates it instead.
+`watch(..., track_value=False)` records that a scalar exists and its kind but not
+its value, for settings your application assigns itself; if you want the value
+pinned, put the assignment and the `watch()` in the same module.
+`review_by` is a nag date only. `on_drift="warn" | "skip" | "raise"`
 decides what happens at import when the lock no longer matches; `MPAT_STRICT=1`
 forces `raise`. Passing a target as an object instead of a dotted string works
 too, resolved through `__module__` and `__qualname__`. Two dotted targets that
 name the same attribute of the same owner are refused as aliases, but the same
 inherited method on two sibling subclasses is not an alias: each patch lands on
 its own class and the base class is left alone.
+
+Say when a workaround can go. `until` is accepted by `patch` and by `watch`:
+`Version` takes a requirement string, `Probe` takes a zero-argument callable,
+and both combine with `|` and `&`. On a patch it also turns the patch off once
+satisfied. On a watch it has no runtime effect, because a watch applies
+nothing, but either way the generated `still-needed[<target>]` test fails the
+day upstream is fixed. That makes a `watch` with `until` the replacement for a
+hand-written "still needed" test around a workaround that is not a `@patch`
+target, such as a per-instance `setattr` wrapper or an attribute your code
+creates on an upstream object:
+
+```python
+watch(
+    "ontospy.core.ontospy.Ontospy",
+    until=Version("ontospy>=2.2") | Probe(ontospy_still_needs_shim),
+    note="data/upstream_shims.py adds .namespaces; see ontospy#120",
+)
+```
+
+`patch` imports the target when the decorator runs. For an optional dependency
+that is the wrong moment, so `when_imported=True` defers it:
+
+```python
+@patch("optionallib.Client.request", when_imported=True)
+def request(original, self, *args, **kwargs):
+    ...
+```
+
+The declaration registers without importing anything. A post-import hook
+applies the patch the first time `optionallib` is imported, or right away if it
+already is, and the `until`, drift and kind checks run at that point. If
+`optionallib` is never imported, nothing happens. `mpat.apply_all()` imports
+every module a deferred patch is still waiting on, for code that wants the
+patches in place before it starts. Locking is unchanged: `mpat lock` has to be
+able to import the target.
 
 ## Lock and check
 
@@ -168,6 +204,58 @@ change.
 Run `mpat check` on dependency-bump MRs. When it fails, read the upstream
 change, fix or delete the patch, run `mpat lock`, commit.
 
+## Declare without code
+
+A watch needs no Python at all. Declare it in `pyproject.toml` and `mpat lock`,
+`mpat check` and the pytest plugin pick it up alongside the modules:
+
+```toml
+[[tool.mpat.watch]]
+target = "qdrant_client.async_qdrant_remote.AsyncQdrantRemote.query_points"
+depends_on = ["qdrant_client.async_qdrant_remote.AsyncQdrantRemote.scroll"]
+review_by = 2026-12-01
+note = "protobuf timeout wrapper in data/qdrant.py relies on this shape"
+```
+
+`target` is required; `depends_on`, `review_by` and `note` mean what they mean
+on `watch()`. `until` is a string: a requirement with a version specifier such
+as `until = "ontospy>=2.2"` becomes `Version`, and a dotted path such as
+`until = "data.upstream_shims.ontospy_still_needs_shim"` becomes a `Probe`
+that imports the callable when first evaluated. The entry is locked with `declared_in = "pyproject.toml"`, the
+denylist applies to it and its `depends_on`, and a malformed entry is a
+configuration error (exit 2) that names the entry.
+
+A patch that only assigns a scalar needs no code either:
+
+```toml
+[[tool.mpat.override]]
+target = "engineio.payload.Payload.max_decode_packets"
+value = 500
+note = "engineio default 16 500s long-polling clients (zauberzeug/nicegui#209)"
+review_by = 2026-12-01
+```
+
+```python
+# the only line the application needs, at startup
+import mpat
+
+mpat.apply_overrides()
+```
+
+`apply_overrides()` assigns every override once per process, after checking
+that the target is an existing attribute of exactly the value's type: `bool`
+is not `int` here, so `value = true` on an int attribute or `value = 1` on a
+bool one raises `UnsupportedTarget`. Each override is also a watch with
+`track_value = false`, so `mpat lock` records that the attribute exists and
+is a scalar, never its value, and `mpat check` is green whether or not the
+override has been applied in that process. A workaround with any logic in it
+is still `@patch`.
+
+A project can have `modules`, `[[tool.mpat.watch]]` and `[[tool.mpat.override]]`
+entries in any combination. A target declared twice, in code and in
+`pyproject.toml` or in both TOML forms, is refused rather than silently
+merged, so there is no precedence to remember.
+
 ## pytest
 
 Install mpat, add `[tool.mpat]`, run pytest. The tests register themselves:
@@ -178,19 +266,25 @@ mpat::still-needed[somelib.client.Client.request] PASSED
 ```
 
 One `drift` item per declared or locked target, one `still-needed` item per
-patch with `until`. They belong to no file of yours, so they are collected by
+patch or watch with `until`. They belong to no file of yours, so they are collected by
 `pytest` and by `pytest <dir>`, and left out when you name a file or a nodeid:
 `pytest tests/test_client.py` runs what you asked for and nothing else. Disable
 them everywhere with `--no-mpat`, or `mpat = false` under
 `[tool.pytest.ini_options]`. `pytest-xdist` works: the items are ordered by
 target, so every worker collects the same list.
 
+In a monorepo with one `pyproject.toml` per service, `pytest services/api/tests`
+from the repository root finds the service's `[tool.mpat]` by walking up from
+the directory you named, and collects its items as `mpat[services/api]::...`.
+Name several service directories and each gets its own set, read from its own
+`mpat.lock`.
+
 Collecting them imports your patch modules the way your application does, so the
 patches are active for the rest of the test session exactly as in production.
 
-A project with `[tool.mpat]` and an empty `modules` gets a single failing
-`mpat::unconfigured` item rather than a green run, so a typo in the module list
-cannot turn the safety net green. A project with no `[tool.mpat]` at all collects
+A project with `[tool.mpat]` but no `modules` and no `[[tool.mpat.watch]]`
+entries gets a single failing `mpat::unconfigured` item rather than a green run,
+so a typo in the module list cannot turn the safety net green. A project with no `[tool.mpat]` at all collects
 nothing.
 
 The explicit form still works and wins when both are present:
