@@ -25,7 +25,8 @@
 - New `[[tool.mpat.override]]` tables assign a scalar upstream attribute from
   `pyproject.toml`, and new `mpat.apply_overrides()` applies them once per
   process; that call is the only code an override needs. The target must be an
-  existing attribute of exactly the value's type, `bool` and `int` included.
+  existing attribute of exactly the value's type, `bool` and `int` included,
+  and it goes through the same drift check as a `watch()` before assignment.
   Each override is locked as a watch with `track_value = false`, so `mpat check`
   is green whether or not the override was applied in that process.
 - `watch()` accepts `until`, the same `Version`, `Probe`, `|` and `&` as

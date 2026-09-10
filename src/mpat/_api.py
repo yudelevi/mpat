@@ -271,15 +271,18 @@ def apply_overrides() -> None:
     config = runtime_config()
     if config is None:
         return
-    for decl in config_declarations(config):
+    declarations = config_declarations(config)
+    for decl in declarations:
         register(decl)
     if collect_mode():
         return
     done = override_originals()
+    by_target = {decl.target: decl for decl in declarations}
     for spec in config.overrides:
         if spec.target in done:
             continue
         resolved = resolve(spec.target)
+        _handle_drift(by_target[spec.target], resolved)
         if type(resolved.static) is not type(spec.value):
             raise UnsupportedTarget(
                 f"{spec.target}: override value is {type(spec.value).__name__}, "

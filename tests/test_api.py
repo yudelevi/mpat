@@ -203,11 +203,13 @@ def test_reload_reapplies_without_nesting(upstream, tmp_path, monkeypatch):
     sys.modules.pop("app_patches", None)
 
 
-def locked_project(upstream, tmp_path, target="fakeup.core.greet", **decl_kwargs):
+def locked_project(
+    upstream, tmp_path, target="fakeup.core.greet", role=_registry.ROLE_PATCH, **decl_kwargs
+):
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n')
     decl = Declaration(
         target=target,
-        role=_registry.ROLE_PATCH,
+        role=role,
         depends_on=(),
         until=None,
         on_drift="warn",
@@ -522,3 +524,13 @@ def test_watch_accepts_until_without_runtime_effect(upstream, tmp_path):
     assert d.until is not None
     assert d.until()
     assert d.status == _registry.STATUS_WATCHED
+
+
+def test_apply_overrides_warns_on_drift_before_assigning(upstream, tmp_path):
+    locked_project(
+        upstream, tmp_path, target="fakeup.LIMIT", role=_registry.ROLE_WATCH, track_value=False
+    )
+    override_project(tmp_path, 'target = "fakeup.LIMIT"\nvalue = 500')
+    upstream.edit("__init__.py", "LIMIT = 16", "def LIMIT():\n    return 16")
+    with pytest.warns(UpstreamDriftWarning, match="moved"), pytest.raises(UnsupportedTarget):
+        mpat.apply_overrides()
