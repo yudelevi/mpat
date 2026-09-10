@@ -404,7 +404,8 @@ is applied immediately. If it is never imported, nothing happens. Everything the
 eager form checks at decoration, the deferred form checks when the hook fires:
 `TargetNotFound`, `UnsupportedTarget`, `KindMismatch`, `until`, and the drift
 check with its `on_drift` behaviour. An error from those propagates out of the
-`import` statement that triggered the hook.
+`import` statement that triggered the hook, and the hook stays queued, so the
+next attempt to import the module runs it again.
 
 The hook keys on the first dotted segment of the target, `optionallib` above,
 because that is the only module name that can be known without importing.

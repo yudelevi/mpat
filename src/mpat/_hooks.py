@@ -76,8 +76,16 @@ def when_imported(module: str, hook: Hook) -> None:
 
 
 def fire(module: str) -> None:
-    for hook in _pending.pop(module, []):
-        hook()
+    """Run the hooks for a module; a hook that raises stays queued, so the next
+    import attempt of that module runs it again instead of silently skipping."""
+    hooks = _pending.pop(module, [])
+    while hooks:
+        try:
+            hooks[0]()
+        except BaseException:
+            _pending[module] = hooks
+            raise
+        hooks.pop(0)
 
 
 def import_pending() -> None:

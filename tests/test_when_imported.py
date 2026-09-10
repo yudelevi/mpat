@@ -163,3 +163,14 @@ def test_reset_removes_the_finder(upstream):
 
 def test_public_surface():
     assert "apply_all" in mpat.__all__
+
+
+def test_failed_hook_fires_again_on_the_next_import(upstream):
+    declare("fakeup.nope")
+    with pytest.raises(TargetNotFound):
+        import fakeup  # noqa: F401
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 16\n\n\ndef nope():\n    return 0")
+    import fakeup
+
+    assert _registry.declarations()[0].status == _registry.STATUS_APPLIED
+    assert fakeup.nope.__wrapped__ is not None
