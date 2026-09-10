@@ -14,12 +14,13 @@ from mpat._config import runtime_config
 from mpat._errors import (
     AlreadyPatched,
     KindMismatch,
+    TargetNotFound,
     UnsupportedTarget,
     UpstreamDriftError,
     UpstreamDriftWarning,
 )
 from mpat._fingerprint import OK, compare, fingerprint
-from mpat._lock import runtime_lock
+from mpat._lock import expand, runtime_lock
 from mpat._registry import (
     ENV_ON,
     ON_DRIFT_WARN,
@@ -92,23 +93,48 @@ def _check_declaration_forbidden(canonical: str, depends_on: Sequence[str]) -> N
         check_forbidden(canonical_target(dep), allow=allow)
 
 
-def _drift_status(decl: Declaration, resolved: Resolved) -> str:
+def _dependency(target: str) -> Resolved | None:
+    try:
+        return resolve(target)
+    except (TargetNotFound, ImportError):
+        return None
+
+
+def _drifted(decl: Declaration, resolved: Resolved) -> list[tuple[str, str]]:
     lock = runtime_lock()
-    if lock is None or decl.target not in lock.entries:
-        return OK
-    return compare(
-        locked=lock.entries[decl.target].fingerprint,
-        current=fingerprint(resolved, track_value=decl.track_value),
-    )
+    if lock is None:
+        return []
+    found: list[tuple[str, str]] = []
+    for wanted in expand([decl]):
+        entry = lock.entries.get(wanted.target)
+        if entry is None:
+            continue
+        current = resolved if wanted.target == decl.target else _dependency(wanted.target)
+        if current is None:
+            continue
+        status = compare(
+            locked=entry.fingerprint,
+            current=fingerprint(current, track_value=wanted.track_value),
+        )
+        if status != OK:
+            found.append((wanted.target, status))
+    return found
+
+
+def _drift_detail(decl: Declaration, drifted: Sequence[tuple[str, str]]) -> str:
+    if len(drifted) == 1 and drifted[0][0] == decl.target:
+        return drifted[0][1]
+    return ", ".join(f"{target}: {status}" for target, status in drifted)
 
 
 def _handle_drift(decl: Declaration, resolved: Resolved) -> bool:
     """Return True when the patch should still be applied."""
-    status = _drift_status(decl, resolved)
-    if status == OK:
+    drifted = _drifted(decl, resolved)
+    if not drifted:
         return True
     action = ON_DRIFT_RAISE if os.environ.get(STRICT_ENV) == ENV_ON else decl.on_drift
-    message = f"{decl.target}: upstream drift ({status}) since mpat.lock. {decl.note}".rstrip()
+    detail = _drift_detail(decl, drifted)
+    message = f"{decl.target}: upstream drift ({detail}) since mpat.lock. {decl.note}".rstrip()
     if action == ON_DRIFT_RAISE:
         raise UpstreamDriftError(message)
     warnings.warn(message, UpstreamDriftWarning, stacklevel=_WARN_STACKLEVEL)

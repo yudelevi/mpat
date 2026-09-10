@@ -101,14 +101,14 @@ entries collects one item, and it fails:
 ```
 FAILED mpat::unconfigured
   <unconfigured>: unconfigured.
-    [tool.mpat] declares nothing; add modules, [[tool.mpat.watch]] or [[tool.mpat.override]] to pyproject.toml
+    [tool.mpat] declares nothing; add modules, [[tool.mpat.watch]] or [[tool.mpat.override]] to pyproject.toml, or the same keys without the tool.mpat prefix to mpat.toml
 ```
 
 It fails rather than skipping on purpose. A typo in the module list would
 otherwise collect zero items and leave the suite green with no coverage at all.
 
-A project with no `[tool.mpat]` section is a different case: the plugin stays
-inert, collects nothing, and says nothing.
+A project with no `[tool.mpat]` section and no `mpat.toml` is a different
+case: the plugin stays inert, collects nothing, and says nothing.
 
 ## The explicit form
 

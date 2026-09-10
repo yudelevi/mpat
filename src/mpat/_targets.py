@@ -127,7 +127,7 @@ def check_forbidden(target: str, *, allow: Sequence[str] = ()) -> None:
         if _matches(target, denied):
             raise ForbiddenTarget(
                 f"{target!r} matches denylist entry {denied!r}; "
-                "add it to [tool.mpat] allow in pyproject.toml to override"
+                "add it to allow in [tool.mpat] or mpat.toml to override"
             )
 
 

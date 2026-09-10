@@ -204,13 +204,18 @@ def test_reload_reapplies_without_nesting(upstream, tmp_path, monkeypatch):
 
 
 def locked_project(
-    upstream, tmp_path, target="fakeup.core.greet", role=_registry.ROLE_PATCH, **decl_kwargs
+    upstream,
+    tmp_path,
+    target="fakeup.core.greet",
+    role=_registry.ROLE_PATCH,
+    depends_on=(),
+    **decl_kwargs,
 ):
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n')
     decl = Declaration(
         target=target,
         role=role,
-        depends_on=(),
+        depends_on=depends_on,
         until=None,
         on_drift="warn",
         review_by=None,
@@ -264,6 +269,39 @@ def test_drift_raise_and_strict_env(upstream, tmp_path, monkeypatch):
     monkeypatch.setenv(_registry.STRICT_ENV, "1")
     with pytest.raises(UpstreamDriftError):
         mpat.watch("fakeup.core.greet")
+
+
+def test_dependency_drift_is_handled_like_target_drift(upstream, tmp_path):
+    locked_project(upstream, tmp_path, depends_on=("fakeup.LIMIT",))
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 1")
+    import fakeup.core
+
+    with pytest.warns(UpstreamDriftWarning, match=r"fakeup\.LIMIT: value"):
+
+        @mpat.patch("fakeup.core.greet", depends_on=["fakeup.LIMIT"], on_drift="skip")
+        def p(original, name, punct="!"):
+            return "patched"
+
+    assert fakeup.core.greet("a") == "hi a!"
+    assert _registry.declarations()[0].status == _registry.STATUS_SKIPPED_DRIFT
+
+
+def test_dependency_drift_raises_under_strict(upstream, tmp_path, monkeypatch):
+    locked_project(upstream, tmp_path, depends_on=("fakeup.LIMIT",))
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 1")
+    monkeypatch.setenv(_registry.STRICT_ENV, "1")
+    with pytest.raises(UpstreamDriftError, match=r"fakeup\.LIMIT: value"):
+        mpat.watch("fakeup.core.greet", depends_on=["fakeup.LIMIT"])
+
+
+def test_unresolvable_dependency_does_not_fail_at_runtime(upstream, tmp_path):
+    locked_project(upstream, tmp_path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+
+        @mpat.patch("fakeup.core.greet", depends_on=["fakeup.core.gone"])
+        def p(original, name, punct="!"):
+            return "patched"
 
 
 def test_no_drift_is_silent(upstream, tmp_path):

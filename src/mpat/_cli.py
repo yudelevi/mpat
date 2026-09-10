@@ -9,8 +9,8 @@ from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
-from mpat._config import Config, load_config
-from mpat._errors import LockError, MpatError
+from mpat._config import CONFIG_FILENAME, PYPROJECT, Config, load_config
+from mpat._errors import LockError, MpatError, TargetNotFound
 from mpat._fingerprint import (
     BODY,
     MOVED,
@@ -18,6 +18,8 @@ from mpat._fingerprint import (
     OK,
     SIGNATURE,
     VALUE,
+    Fingerprint,
+    compare,
     fingerprint,
 )
 from mpat._lock import (
@@ -53,6 +55,7 @@ _NO_DECLARATIONS = "no declarations found"
 _NO_SOURCE_MARKER = " [signature-only]"
 _NO_SOURCE_NOTICE = "no source available, only the signature is locked"
 _NO_DIST = "(no distribution)"
+_MISSING_CELL = "(missing)"
 _DRIFT_STATUSES = (MISSING, MOVED, SIGNATURE, BODY, VALUE, NO_SOURCE)
 _FOOTERS: tuple[tuple[tuple[str, ...], str], ...] = (
     ((UNLOCKED,), "unlocked: run 'mpat lock'"),
@@ -68,12 +71,11 @@ _FOOTERS: tuple[tuple[tuple[str, ...], str], ...] = (
 def _require_config() -> Config:
     config = load_config()
     if config is None:
-        raise MpatError("no pyproject.toml found in the current directory or its parents")
-    if not config.declares_anything:
         raise MpatError(
-            "[tool.mpat] in pyproject.toml lists no modules and no watch entries; "
-            "nothing to collect"
+            f"no {PYPROJECT} or {CONFIG_FILENAME} found in the current directory or its parents"
         )
+    if not config.declares_anything:
+        raise MpatError(f"{config.where} lists no modules and no watch entries; nothing to collect")
     return config
 
 
@@ -185,6 +187,31 @@ def cmd_show(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _diff_lines(locked: Fingerprint, current: Fingerprint | None) -> list[str]:
+    lines: list[str] = []
+    for name, before in dataclasses.asdict(locked).items():
+        after = _MISSING_CELL if current is None else getattr(current, name)
+        if before != after:
+            lines.append(f"{name}: {before} -> {after}")
+    return lines
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    config = _require_config()
+    entry = _existing_lock(config.root).entries.get(args.target)
+    if entry is None:
+        raise MpatError(f"{args.target}: not in {LOCK_FILENAME}")
+    try:
+        current = fingerprint(resolve(args.target), track_value=entry.track_value)
+    except TargetNotFound:
+        current = None
+    status = MISSING if current is None else compare(locked=entry.fingerprint, current=current)
+    print(f"status: {status}")
+    for line in _diff_lines(entry.fingerprint, current):
+        print(line)
+    return EXIT_OK if status == OK else EXIT_DRIFT
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mpat")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -196,6 +223,9 @@ def _parser() -> argparse.ArgumentParser:
     show_parser = sub.add_parser("show", help="print fingerprint and source of a target")
     show_parser.add_argument("target")
     show_parser.set_defaults(fn=cmd_show)
+    diff_parser = sub.add_parser("diff", help="show which locked fields of a target changed")
+    diff_parser.add_argument("target")
+    diff_parser.set_defaults(fn=cmd_diff)
     return parser
 
 

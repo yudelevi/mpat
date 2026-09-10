@@ -62,19 +62,28 @@ def _iter_defs(
                 yield from _iter_defs(handler.body)
 
 
+def _first_line(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> int:
+    return min([node.lineno, *(d.lineno for d in node.decorator_list)])
+
+
 def _definition_node(
-    tree: ast.Module, qualname: str
+    tree: ast.Module, qualname: str, *, lineno: int | None = None
 ) -> ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | None:
     if "<locals>" in qualname:
         return None
     body: list[ast.stmt] = tree.body
     node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | None = None
-    for name in qualname.split("."):
+    *parents, leaf = qualname.split(".")
+    for name in parents:
         node = next((n for n in _iter_defs(body) if n.name == name), None)
         if node is None:
             return None
         body = node.body
-    return node
+    candidates = [n for n in _iter_defs(body) if n.name == leaf]
+    if not candidates:
+        return None
+    at_line = [n for n in candidates if _first_line(n) == lineno]
+    return at_line[0] if at_line else candidates[0]
 
 
 def _hash(node: ast.AST) -> str:
@@ -91,14 +100,21 @@ def _source_file(obj: Any) -> str | None:
     return None
 
 
+_SOURCE_FAILURES = (OSError, UnicodeDecodeError, SyntaxError, ValueError)
+
+
 def _source_hash(obj: Any, file: str) -> str | None:
-    tree = ast.parse(Path(file).read_text(encoding="utf-8"))
+    try:
+        tree = ast.parse(Path(file).read_text(encoding="utf-8"))
+    except _SOURCE_FAILURES:
+        return None
     if inspect.ismodule(obj):
         return _hash(tree)
     qualname = getattr(obj, "__qualname__", None)
     if not qualname:
         return None
-    node = _definition_node(tree, qualname)
+    code = getattr(obj, "__code__", None)
+    node = _definition_node(tree, qualname, lineno=getattr(code, "co_firstlineno", None))
     return None if node is None else _hash(node)
 
 

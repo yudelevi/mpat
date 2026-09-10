@@ -1,7 +1,7 @@
 # Lockfile
 
-`mpat.lock` is TOML. It lives next to `pyproject.toml`, at the root `mpat` finds
-by walking up from the working directory. Commit it.
+`mpat.lock` is TOML. It lives next to `mpat.toml` or `pyproject.toml`, at the
+root `mpat` finds by walking up from the working directory. Commit it.
 
 `mpat lock` writes it. Nothing else does.
 
@@ -57,7 +57,7 @@ no_source = false
 | Field | Meaning |
 | --- | --- |
 | `role` | `patch`, `watch` or `depends_on` |
-| `declared_in` | The file the declaration came from, relative to the project root, or `pyproject.toml` for a `[[tool.mpat.watch]]` or `[[tool.mpat.override]]` entry |
+| `declared_in` | The file the declaration came from, relative to the project root, or the configuration file (`pyproject.toml` or `mpat.toml`) for a watch or override table |
 | `parent` | Present on `depends_on` entries only, naming the target that declared it |
 | `track_value` | `false` when the target was declared with `watch(..., track_value=False)` or as a `[[tool.mpat.override]]`; omitted otherwise |
 | `kind` | `function`, `class`, `attribute` or `module` |
