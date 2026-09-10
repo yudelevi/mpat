@@ -188,6 +188,27 @@ change.
 Run `mpat check` on dependency-bump MRs. When it fails, read the upstream
 change, fix or delete the patch, run `mpat lock`, commit.
 
+## Declare without code
+
+A watch needs no Python at all. Declare it in `pyproject.toml` and `mpat lock`,
+`mpat check` and the pytest plugin pick it up alongside the modules:
+
+```toml
+[[tool.mpat.watch]]
+target = "qdrant_client.async_qdrant_remote.AsyncQdrantRemote.query_points"
+depends_on = ["qdrant_client.async_qdrant_remote.AsyncQdrantRemote.scroll"]
+review_by = 2026-12-01
+note = "protobuf timeout wrapper in data/qdrant.py relies on this shape"
+```
+
+`target` is required; `depends_on`, `review_by` and `note` mean what they mean
+on `watch()`. The entry is locked with `declared_in = "pyproject.toml"`, the
+denylist applies to it and its `depends_on`, and a malformed entry is a
+configuration error (exit 2) that names the entry. A project can have `modules`,
+`[[tool.mpat.watch]]` entries, or both; a target declared both in code and in
+`pyproject.toml` is refused as declared twice rather than silently merged, so
+there is no precedence to remember.
+
 ## pytest
 
 Install mpat, add `[tool.mpat]`, run pytest. The tests register themselves:
@@ -208,9 +229,9 @@ target, so every worker collects the same list.
 Collecting them imports your patch modules the way your application does, so the
 patches are active for the rest of the test session exactly as in production.
 
-A project with `[tool.mpat]` and an empty `modules` gets a single failing
-`mpat::unconfigured` item rather than a green run, so a typo in the module list
-cannot turn the safety net green. A project with no `[tool.mpat]` at all collects
+A project with `[tool.mpat]` but no `modules` and no `[[tool.mpat.watch]]`
+entries gets a single failing `mpat::unconfigured` item rather than a green run,
+so a typo in the module list cannot turn the safety net green. A project with no `[tool.mpat]` at all collects
 nothing.
 
 The explicit form still works and wins when both are present:

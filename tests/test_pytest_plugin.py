@@ -303,3 +303,28 @@ def test_collection_applies_when_imported_patches_for_later_tests(pytester, upst
     forget_patch_module(upstream)
     result = run(pytester, "-v")
     result.assert_outcomes(passed=2)
+
+
+CONFIG_WATCH = '[[tool.mpat.watch]]\ntarget = "fakeup.core.greet"\nnote = "issue #9"\n'
+
+
+def test_config_watches_alone_are_collected(pytester, upstream):
+    (pytester.path / "pyproject.toml").write_text(PYPROJECT + "[tool.mpat]\n" + CONFIG_WATCH)
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    result = run(pytester, "-v")
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines(["mpat::drift[[]fakeup.core.greet[]] PASSED*"])
+    result.stdout.no_fnmatch_line("*unconfigured*")
+    upstream.edit("core.py", 'f"hi', 'f"hey')
+    result = run(pytester)
+    result.assert_outcomes(failed=1)
+    result.stdout.fnmatch_lines(["fakeup.core.greet: body. issue #9"])
+
+
+def test_config_watch_duplicating_code_fails_collection(pytester, upstream, monkeypatch):
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    (root / "pyproject.toml").write_text(PYPROJECT + MPAT_SECTION + CONFIG_WATCH)
+    monkeypatch.syspath_prepend(str(root))
+    result = run(pytester)
+    result.assert_outcomes(errors=1)
+    result.stdout.fnmatch_lines(["*declared twice: pyproject.toml and*app_patches.py*"])

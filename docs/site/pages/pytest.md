@@ -71,8 +71,8 @@ Patches with no `until` produce no item here.
 
 ## The unconfigured case
 
-A project with `[tool.mpat]` and an empty `modules` collects one item, and it
-fails:
+A project with `[tool.mpat]` but no `modules` and no `[[tool.mpat.watch]]`
+entries collects one item, and it fails:
 
 ```
 FAILED mpat::unconfigured

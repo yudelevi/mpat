@@ -117,6 +117,33 @@ role or `depends_on`.
 warns, and `MPAT_STRICT=1` turns that warning into an error like it does for a
 patch.
 
+## Declaring in `pyproject.toml`
+
+A watch does not need a Python module. `[[tool.mpat.watch]]` declares one in
+the same `[tool.mpat]` section that lists your modules:
+
+```toml
+[[tool.mpat.watch]]
+target = "qdrant_client.async_qdrant_remote.AsyncQdrantRemote.query_points"
+depends_on = ["qdrant_client.async_qdrant_remote.AsyncQdrantRemote.scroll"]
+review_by = 2026-12-01
+note = "protobuf timeout wrapper in data/qdrant.py relies on this shape"
+```
+
+`target` is required. `depends_on`, `review_by` and `note` are optional and
+mean what they mean on [`watch()`](#watch); `review_by` is a bare TOML date.
+Any other key, or a key of the wrong type, is a configuration error that names
+the entry.
+
+`mpat lock`, `mpat check` and the pytest plugin register these after importing
+`[tool.mpat] modules`, so a project can have either or both. The lock entry
+carries `declared_in = "pyproject.toml"`. The target is resolved when it is
+locked or checked, not when the configuration is read, and the denylist applies
+to it and to its `depends_on` the same as in code.
+
+A target declared both in code and in `pyproject.toml` is refused as declared
+twice, naming both places. Delete one of them; there is no precedence.
+
 ## Targets
 
 A target is a dotted path to an attribute of a module or a class.

@@ -39,11 +39,11 @@ def unconfigured_result() -> CheckResult:
 
 def collect(start: Path | None = None) -> Collected | None:
     config = load_config(start)
-    if config is None or not config.modules:
+    if config is None or not config.declares_anything:
         return None
     path = lock_path(config.root)
     return Collected(
-        declarations=collect_declarations(config.modules, apply=True),
+        declarations=collect_declarations(config, apply=True),
         lock=read_lock(path) if path.is_file() else Lock(entries={}),
         root=config.root,
     )

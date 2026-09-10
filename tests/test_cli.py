@@ -213,3 +213,82 @@ def test_check_groups_rows_by_distribution(tmp_path, upstream, monkeypatch, caps
     lines = capsys.readouterr().out.splitlines()
     assert "# packaging" in lines
     assert "" in lines
+
+
+CONFIG_WATCHES = """
+[[tool.mpat.watch]]
+target = "fakeup.core.greet"
+depends_on = ["fakeup.LIMIT"]
+note = "issue #9"
+
+[[tool.mpat.watch]]
+target = "fakeup.REGISTRY"
+"""
+
+
+def config_only_project(tmp_path: Path) -> Path:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\n' + CONFIG_WATCHES
+    )
+    return tmp_path
+
+
+def test_config_watches_lock_check_and_drift(tmp_path, upstream, capsys):
+    root = config_only_project(tmp_path)
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    lock = _lock.read_lock(_lock.lock_path(root))
+    assert set(lock.entries) == {"fakeup.core.greet", "fakeup.LIMIT", "fakeup.REGISTRY"}
+    assert lock.entries["fakeup.core.greet"].declared_in == "pyproject.toml"
+    assert lock.entries["fakeup.core.greet"].role == "watch"
+    assert lock.entries["fakeup.LIMIT"].parent == "fakeup.core.greet"
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    capsys.readouterr()
+    upstream.edit("core.py", 'f"hi', 'f"hey')
+    assert _cli.main(["check", "--json"]) == _cli.EXIT_DRIFT
+    by_target = {r["target"]: r for r in json.loads(capsys.readouterr().out)}
+    assert by_target["fakeup.core.greet"]["status"] == "body"
+    assert by_target["fakeup.core.greet"]["declared_in"] == "pyproject.toml"
+    assert by_target["fakeup.core.greet"]["note"] == "issue #9"
+
+
+def test_config_watch_table_prints_pyproject_as_source(tmp_path, upstream, capsys):
+    config_only_project(tmp_path)
+    _cli.main(["lock"])
+    capsys.readouterr()
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    assert "pyproject.toml" in capsys.readouterr().out
+
+
+def test_config_watch_duplicating_code_is_a_usage_error(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\nmodules = ["app_patches"]\n'
+        '[[tool.mpat.watch]]\ntarget = "fakeup.REGISTRY"\n'
+    )
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_USAGE
+    err = capsys.readouterr().err
+    assert "fakeup.REGISTRY: declared twice: pyproject.toml and" in err
+    assert "app_patches.py" in err
+
+
+def test_denylisted_config_watch_is_a_usage_error(tmp_path, capsys):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\n[[tool.mpat.watch]]\ntarget = "ssl.SSLContext"\n'
+    )
+    assert _cli.main(["lock"]) == _cli.EXIT_USAGE
+    assert "denylist" in capsys.readouterr().err
+
+
+def test_malformed_config_watch_is_a_usage_error(tmp_path, capsys):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\n[[tool.mpat.watch]]\ntarget = 5\n'
+    )
+    assert _cli.main(["check"]) == _cli.EXIT_USAGE
+    assert "[[tool.mpat.watch]]" in capsys.readouterr().err
+
+
+def test_empty_config_is_a_usage_error(tmp_path, capsys):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n[tool.mpat]\n')
+    assert _cli.main(["check"]) == _cli.EXIT_USAGE
+    assert "nothing to collect" in capsys.readouterr().err

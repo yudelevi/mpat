@@ -16,6 +16,7 @@ from mpat._fingerprint import OK, compare, fingerprint
 from mpat._lock import runtime_lock
 from mpat._registry import (
     ENV_ON,
+    ON_DRIFT_WARN,
     ROLE_PATCH,
     ROLE_WATCH,
     STATUS_APPLIED,
@@ -43,7 +44,6 @@ from mpat._targets import (
 )
 from mpat._until import Until
 
-ON_DRIFT_WARN = "warn"
 ON_DRIFT_SKIP = "skip"
 ON_DRIFT_RAISE = "raise"
 ON_DRIFT_VALUES = (ON_DRIFT_WARN, ON_DRIFT_SKIP, ON_DRIFT_RAISE)

@@ -17,6 +17,11 @@
   override. The lock entry carries `track_value = false` and no `value_repr`, and
   changing `track_value` on a locked target reports `unlocked` until the next
   `mpat lock`, like a role or `depends_on` change.
+- Watches can be declared in `pyproject.toml` as `[[tool.mpat.watch]]` tables
+  with `target`, `depends_on`, `review_by` and `note`, so a project with no
+  patch module still gets `mpat lock`, `mpat check` and the pytest items. The
+  entry is locked with `declared_in = "pyproject.toml"`. A target declared
+  both in code and in `pyproject.toml` is refused as declared twice.
 
 ## 0.2.0
 
