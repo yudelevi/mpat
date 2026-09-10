@@ -575,3 +575,39 @@ def test_subdirectory_argument_keeps_the_single_project_node_ids(pytester, upstr
             "mpat::still-needed[[]fakeup.core.greet[]] PASSED*",
         ]
     )
+
+
+def config_watch_service(
+    root: Path, name: str, target: str, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    path = root / "services" / name
+    (path / "tests").mkdir(parents=True)
+    (path / "pyproject.toml").write_text(
+        PYPROJECT + f'[tool.mpat]\n[[tool.mpat.watch]]\ntarget = "{target}"\n'
+    )
+    (path / "tests" / f"test_{name}.py").write_text("def test_ok():\n    pass\n")
+    with monkeypatch.context() as m:
+        m.chdir(path)
+        assert _cli.main(["lock"]) == _cli.EXIT_OK
+    _registry.reset()
+    return path
+
+
+def test_config_watches_in_two_services_are_scoped_to_their_own_service(
+    pytester, upstream, monkeypatch
+):
+    root = pytester.path
+    (root / "pyproject.toml").write_text(PYPROJECT + ROOT_PYTEST_SECTION)
+    config_watch_service(root, "api", "fakeup.core.greet", monkeypatch)
+    config_watch_service(root, "web", "fakeup.core.Store.add", monkeypatch)
+    monkeypatch.chdir(root)
+    result = run(pytester, "-v", "services/api/tests", "services/web/tests")
+    result.assert_outcomes(passed=4)
+    result.stdout.fnmatch_lines(
+        [
+            "mpat[[]services/api[]]::drift[[]fakeup.core.greet[]] PASSED*",
+            "mpat[[]services/web[]]::drift[[]fakeup.core.Store.add[]] PASSED*",
+        ]
+    )
+    result.stdout.no_fnmatch_line("mpat[[]services/web[]]::*[[]fakeup.core.greet[]]*")
+    result.stdout.no_fnmatch_line("mpat[[]services/api[]]::*[[]fakeup.core.Store.add[]]*")

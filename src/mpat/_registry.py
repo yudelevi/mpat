@@ -5,6 +5,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from mpat._config import PYPROJECT, Config, OverrideSpec, WatchSpec
@@ -97,7 +98,8 @@ def _check_forbidden(target: str, depends_on: Sequence[str], *, allow: Sequence[
         check_forbidden(dep, allow=allow)
 
 
-def watch_declaration(spec: WatchSpec) -> Declaration:
+def watch_declaration(spec: WatchSpec, *, root: Path) -> Declaration:
+    declared_in = str(root / PYPROJECT)
     return Declaration(
         target=spec.target,
         role=ROLE_WATCH,
@@ -106,12 +108,13 @@ def watch_declaration(spec: WatchSpec) -> Declaration:
         on_drift=ON_DRIFT_WARN,
         review_by=spec.review_by,
         note=spec.note,
-        declared_in=PYPROJECT,
-        identity=(PYPROJECT, f"{ROLE_WATCH}:{spec.target}"),
+        declared_in=declared_in,
+        identity=(declared_in, f"{ROLE_WATCH}:{spec.target}"),
     )
 
 
-def override_declaration(spec: OverrideSpec) -> Declaration:
+def override_declaration(spec: OverrideSpec, *, root: Path) -> Declaration:
+    declared_in = str(root / PYPROJECT)
     return Declaration(
         target=spec.target,
         role=ROLE_WATCH,
@@ -120,8 +123,8 @@ def override_declaration(spec: OverrideSpec) -> Declaration:
         on_drift=ON_DRIFT_WARN,
         review_by=spec.review_by,
         note=spec.note,
-        declared_in=PYPROJECT,
-        identity=(PYPROJECT, f"{_OVERRIDE_IDENTITY}:{spec.target}"),
+        declared_in=declared_in,
+        identity=(declared_in, f"{_OVERRIDE_IDENTITY}:{spec.target}"),
         track_value=False,
     )
 
@@ -133,13 +136,17 @@ def config_declarations(config: Config) -> list[Declaration]:
     for spec in config.overrides:
         _check_forbidden(spec.target, (), allow=config.allow)
     return [
-        *(watch_declaration(spec) for spec in config.watches),
-        *(override_declaration(spec) for spec in config.overrides),
+        *(watch_declaration(spec, root=config.root) for spec in config.watches),
+        *(override_declaration(spec, root=config.root) for spec in config.overrides),
     ]
 
 
+def from_config(decl: Declaration) -> bool:
+    return Path(decl.declared_in).name == PYPROJECT
+
+
 def _register_config(config: Config) -> None:
-    from_code = {d.target: d for d in declarations() if d.declared_in != PYPROJECT}
+    from_code = {d.target: d for d in declarations() if not from_config(d)}
     for decl in config_declarations(config):
         if decl.target in from_code:
             raise MpatError(

@@ -114,8 +114,8 @@ def test_config_watches_register_after_the_modules():
     assert d.depends_on == ("fakeup.REGISTRY",)
     assert d.review_by == date(2026, 12, 1)
     assert d.note == "see fakeup#1"
-    assert d.declared_in == "pyproject.toml"
-    assert d.identity == ("pyproject.toml", "watch:fakeup.LIMIT")
+    assert d.declared_in == "/proj/pyproject.toml"
+    assert d.identity == ("/proj/pyproject.toml", "watch:fakeup.LIMIT")
     assert d.track_value is True
     assert d.until is None
 
@@ -162,8 +162,8 @@ def test_config_override_registers_an_existence_only_watch():
     assert d.depends_on == ()
     assert d.note == "n"
     assert d.review_by == date(2026, 12, 1)
-    assert d.declared_in == "pyproject.toml"
-    assert d.identity == ("pyproject.toml", "override:fakeup.LIMIT")
+    assert d.declared_in == "/proj/pyproject.toml"
+    assert d.identity == ("/proj/pyproject.toml", "override:fakeup.LIMIT")
 
 
 def test_config_override_honours_the_denylist():
