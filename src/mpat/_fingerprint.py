@@ -91,8 +91,14 @@ def _source_file(obj: Any) -> str | None:
     return None
 
 
+_SOURCE_FAILURES = (OSError, UnicodeDecodeError, SyntaxError, ValueError)
+
+
 def _source_hash(obj: Any, file: str) -> str | None:
-    tree = ast.parse(Path(file).read_text(encoding="utf-8"))
+    try:
+        tree = ast.parse(Path(file).read_text(encoding="utf-8"))
+    except _SOURCE_FAILURES:
+        return None
     if inspect.ismodule(obj):
         return _hash(tree)
     qualname = getattr(obj, "__qualname__", None)
