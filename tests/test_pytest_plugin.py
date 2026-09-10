@@ -1,10 +1,11 @@
 import os
+import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-from mpat import _cli
+from mpat import _cli, _registry
 from tests.conftest import forget_patch_module
 
 PYPROJECT = '[project]\nname = "x"\n'
@@ -439,5 +440,138 @@ def test_config_watch_until_strings(pytester, upstream, monkeypatch):
             "mpat::still-needed[[]fakeup.LIMIT[]] PASSED*",
             "mpat::still-needed[[]fakeup.core.greet[]] FAILED*",
             "fakeup.core.greet: upstream fixed, delete this watch. shim in app.py",
+        ]
+    )
+
+
+ROOT_PYTEST_SECTION = "[tool.pytest.ini_options]\n"
+SERVICE_TARGETS = {"api": "fakeup.core.greet", "web": "fakeup.core.Store.add"}
+ROOT_TARGET = "fakeup.core.decorated"
+
+
+def patch_module(path: Path, target: str) -> None:
+    path.write_text(
+        textwrap.dedent(
+            f"""
+            import mpat
+
+            @mpat.patch("{target}", until=mpat.Probe(lambda: False), note="drop me")
+            def repl(original, *args, **kwargs):
+                return original(*args, **kwargs)
+            """
+        )
+    )
+
+
+def service(root: Path, name: str) -> Path:
+    path = root / "services" / name
+    (path / "tests").mkdir(parents=True)
+    (path / "pyproject.toml").write_text(PYPROJECT + f'[tool.mpat]\nmodules = ["{name}_patches"]\n')
+    patch_module(path / f"{name}_patches.py", SERVICE_TARGETS[name])
+    (path / "tests" / f"test_{name}.py").write_text("def test_ok():\n    pass\n")
+    return path
+
+
+def lock_in(path: Path, module: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run `mpat lock` for one project and undo its in-process side effects, as a
+    subprocess run would have: the next project must not see this one's registry."""
+    monkeypatch.syspath_prepend(str(path))
+    with monkeypatch.context() as m:
+        m.chdir(path)
+        assert _cli.main(["lock"]) == _cli.EXIT_OK
+    sys.modules.pop(module)
+    _registry.reset()
+
+
+def monorepo(pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch, *names: str) -> Path:
+    root = pytester.path
+    (root / "pyproject.toml").write_text(PYPROJECT + ROOT_PYTEST_SECTION)
+    for name in names:
+        lock_in(service(root, name), f"{name}_patches", monkeypatch)
+    return root
+
+
+def test_service_below_rootdir_is_collected_from_the_root(pytester, upstream, monkeypatch):
+    monorepo(pytester, monkeypatch, "api")
+    result = run(pytester, "-v", "services/api/tests")
+    result.assert_outcomes(passed=3)
+    result.stdout.fnmatch_lines(
+        [
+            f"rootdir: {pytester.path}*",
+            "mpat[[]services/api[]]::drift[[]fakeup.core.greet[]] PASSED*",
+            "mpat[[]services/api[]]::still-needed[[]fakeup.core.greet[]] PASSED*",
+        ]
+    )
+
+
+def test_each_service_in_one_invocation_gets_its_own_collector(pytester, upstream, monkeypatch):
+    monorepo(pytester, monkeypatch, "api", "web")
+    result = run(pytester, "-v", "services/api/tests", "services/web/tests")
+    result.assert_outcomes(passed=6)
+    result.stdout.fnmatch_lines(
+        [
+            "mpat[[]services/api[]]::drift[[]fakeup.core.greet[]] PASSED*",
+            "mpat[[]services/api[]]::still-needed[[]fakeup.core.greet[]] PASSED*",
+            "mpat[[]services/web[]]::drift[[]fakeup.core.Store.add[]] PASSED*",
+            "mpat[[]services/web[]]::still-needed[[]fakeup.core.Store.add[]] PASSED*",
+        ]
+    )
+    result.stdout.no_fnmatch_line("mpat[[]services/api[]]::*[[]fakeup.core.Store.add[]]*")
+    result.stdout.no_fnmatch_line("mpat[[]services/web[]]::*[[]fakeup.core.greet[]]*")
+
+
+def test_service_lockfile_is_read_from_the_service_directory(pytester, upstream, monkeypatch):
+    root = monorepo(pytester, monkeypatch, "api")
+    (root / "services" / "api" / "mpat.lock").unlink()
+    result = run(pytester, "services/api/tests")
+    result.assert_outcomes(failed=1, passed=2)
+    result.stdout.fnmatch_lines(["*drift[[]fakeup.core.greet[]]*", "fakeup.core.greet: unlocked*"])
+
+
+def test_same_service_named_twice_is_collected_once(pytester, upstream, monkeypatch):
+    monorepo(pytester, monkeypatch, "api")
+    result = run(pytester, "services/api/tests", "services/api")
+    result.assert_outcomes(passed=3)
+
+
+def test_rootdir_section_and_service_section_are_both_collected(pytester, upstream, monkeypatch):
+    root = monorepo(pytester, monkeypatch, "api")
+    (root / "pyproject.toml").write_text(
+        PYPROJECT + ROOT_PYTEST_SECTION + '[tool.mpat]\nmodules = ["root_patches"]\n'
+    )
+    patch_module(root / "root_patches.py", ROOT_TARGET)
+    lock_in(root, "root_patches", monkeypatch)
+    result = run(pytester, "-v", "services/api/tests")
+    result.assert_outcomes(passed=5)
+    result.stdout.fnmatch_lines(
+        [
+            "mpat::drift[[]fakeup.core.decorated[]] PASSED*",
+            "mpat::still-needed[[]fakeup.core.decorated[]] PASSED*",
+            "mpat[[]services/api[]]::drift[[]fakeup.core.greet[]] PASSED*",
+            "mpat[[]services/api[]]::still-needed[[]fakeup.core.greet[]] PASSED*",
+        ]
+    )
+    result.stdout.no_fnmatch_line("mpat::*[[]fakeup.core.greet[]]*")
+
+
+def test_rootdir_without_section_and_no_arguments_is_inert(pytester, upstream, monkeypatch):
+    monorepo(pytester, monkeypatch, "api")
+    result = run(pytester, "-W", "error")
+    result.assert_outcomes(passed=1)
+    result.stdout.no_fnmatch_line("*mpat*::*")
+
+
+def test_subdirectory_argument_keeps_the_single_project_node_ids(pytester, upstream, monkeypatch):
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    (root / "tests").mkdir()
+    local_test(root / "tests")
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    result = run(pytester, "-v", "tests")
+    result.assert_outcomes(passed=3)
+    result.stdout.fnmatch_lines(
+        [
+            "mpat::drift[[]fakeup.core.greet[]] PASSED*",
+            "mpat::still-needed[[]fakeup.core.greet[]] PASSED*",
         ]
     )

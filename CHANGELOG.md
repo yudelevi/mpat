@@ -35,6 +35,14 @@
   of a hand-written one. `[[tool.mpat.watch]]` entries take `until` as a
   string: a requirement with a version specifier, or a dotted path to a
   zero-argument callable that is imported when first evaluated.
+- Fixed: the pytest plugin looked for `[tool.mpat]` only at pytest's rootdir,
+  so in a monorepo with one `pyproject.toml` per service and none at the root,
+  `pytest services/api/tests` from the root silently collected nothing. The
+  plugin now walks up from each directory argument to its nearest
+  `pyproject.toml` and collects one set of items per `[tool.mpat]` it finds,
+  each reading the lockfile next to its own `pyproject.toml`. A project that is
+  not the rootdir's own is collected as `mpat[services/api]::...`; the rootdir's
+  own project keeps the `mpat::...` node ids it had.
 
 ## 0.2.0
 
