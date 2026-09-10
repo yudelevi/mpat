@@ -7,6 +7,7 @@ from mpat._errors import (
     KindMismatch,
     LockError,
     MpatError,
+    TargetImportError,
     TargetNotFound,
     UnsupportedTarget,
     UpstreamDriftError,
@@ -14,7 +15,7 @@ from mpat._errors import (
 )
 from mpat._until import Probe, Until, Version
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 __all__ = [
     "AlreadyPatched",
@@ -23,6 +24,7 @@ __all__ = [
     "LockError",
     "MpatError",
     "Probe",
+    "TargetImportError",
     "TargetNotFound",
     "UnsupportedTarget",
     "Until",
