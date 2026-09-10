@@ -163,6 +163,27 @@ When there is no readable source the body is replaced by
 Use it to see what changed after a `body` row: run it before and after the bump,
 or against the version the lockfile recorded.
 
+## `mpat diff`
+
+Prints the drift status of one locked target, then every fingerprint field whose
+locked value differs from the installed one. It reads `mpat.lock` and resolves
+the target; it does not import `[tool.mpat] modules`.
+
+```
+$ mpat diff somelib.client.Client.request
+status: signature
+signature: (self, method, url, **kwargs) -> (self, method, url, *, timeout=None, **kwargs)
+source_hash: sha256:0684635… -> sha256:9b1c7ee…
+dist_version: 2.3.1 -> 2.5.0
+```
+
+`ok` prints only the status line. A target that no longer exists prints
+`status: missing` and every locked field against `(missing)`. The lock records
+hashes, not source, so a `body` change shows the two hashes; read the upstream
+diff between the two `dist_version` values for the actual change.
+
+Exits 0 on `ok`, 1 on any other status, 2 when the target is not in `mpat.lock`.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -173,13 +194,14 @@ or against the version the lockfile recorded.
 
 `review` is not `ok`, so an overdue `review_by` fails `mpat check` too.
 
-Exit 2 covers a missing `pyproject.toml`, an empty `[tool.mpat] modules`, an
-unreadable or unsupported `mpat.lock`, and an unresolvable target passed to
-`mpat show`. The message goes to stderr with an `mpat: ` prefix.
+Exit 2 covers a missing `pyproject.toml` or `mpat.toml`, a configuration that
+declares nothing, an unreadable or unsupported `mpat.lock`, an unresolvable
+target passed to `mpat show`, and a target passed to `mpat diff` that is not in
+the lock. The message goes to stderr with an `mpat: ` prefix.
 
 ```
 $ mpat check
-mpat: [tool.mpat] modules is empty in pyproject.toml; nothing to collect
+mpat: [tool.mpat] in pyproject.toml lists no modules and no watch entries; nothing to collect
 $ echo $?
 2
 ```

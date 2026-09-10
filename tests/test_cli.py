@@ -338,3 +338,38 @@ def test_empty_mpat_toml_is_a_usage_error(tmp_path, capsys):
     (tmp_path / "mpat.toml").write_text("")
     assert _cli.main(["check"]) == _cli.EXIT_USAGE
     assert "mpat.toml lists no modules" in capsys.readouterr().err
+
+
+def test_diff_reports_changed_fields(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    capsys.readouterr()
+    assert _cli.main(["diff", "fakeup.core.greet"]) == _cli.EXIT_OK
+    assert capsys.readouterr().out == "status: ok\n"
+    upstream.edit("core.py", 'def greet(name, punct="!"):', 'def greet(name, punct="?"):')
+    assert _cli.main(["diff", "fakeup.core.greet"]) == _cli.EXIT_DRIFT
+    out = capsys.readouterr().out
+    assert out.startswith("status: signature\n")
+    assert "signature: (name, punct='!') -> (name, punct='?')\n" in out
+    assert "source_hash: sha256:" in out
+    assert "kind:" not in out
+
+
+def test_diff_missing_target_prints_locked_fields(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    upstream.edit("__init__.py", "LIMIT = 16", "CAP = 16")
+    capsys.readouterr()
+    assert _cli.main(["diff", "fakeup.LIMIT"]) == _cli.EXIT_DRIFT
+    out = capsys.readouterr().out
+    assert out.startswith("status: missing\n")
+    assert "value_repr: 16 -> (missing)\n" in out
+
+
+def test_diff_unlocked_target_is_a_usage_error(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["diff", "fakeup.core.greet"]) == _cli.EXIT_USAGE
+    assert "not in mpat.lock" in capsys.readouterr().err
