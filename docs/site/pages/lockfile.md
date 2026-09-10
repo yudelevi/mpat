@@ -59,6 +59,7 @@ no_source = false
 | `role` | `patch`, `watch` or `depends_on` |
 | `declared_in` | The file the declaration came from, relative to the project root |
 | `parent` | Present on `depends_on` entries only, naming the target that declared it |
+| `track_value` | `false` when the target was declared with `watch(..., track_value=False)`; omitted otherwise |
 | `kind` | `function`, `class`, `attribute` or `module` |
 | `resolved` | Where the target actually resolved to, which is not always where you named it |
 | `is_async` | True for coroutine functions |
@@ -72,7 +73,9 @@ no_source = false
 
 Fields with a `None` value are omitted from the table. Entries for constants
 carry `value_repr` instead of `source_hash` and `source_file`; entries for
-functions and classes carry the hash and no `value_repr`.
+functions and classes carry the hash and no `value_repr`. A constant declared
+with `track_value=False` carries `track_value = false` and no `value_repr`, so only its
+existence and kind are compared.
 
 `resolved` is the interesting one. It is derived from the object's `__module__`
 and `__qualname__`, so if upstream moves a function and re-exports it under the

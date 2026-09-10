@@ -85,7 +85,10 @@ def _drift_status(decl: Declaration, resolved: Resolved) -> str:
     lock = runtime_lock()
     if lock is None or decl.target not in lock.entries:
         return OK
-    return compare(locked=lock.entries[decl.target].fingerprint, current=fingerprint(resolved))
+    return compare(
+        locked=lock.entries[decl.target].fingerprint,
+        current=fingerprint(resolved, track_value=decl.track_value),
+    )
 
 
 def _handle_drift(decl: Declaration, resolved: Resolved) -> bool:
@@ -222,6 +225,7 @@ def watch(
     depends_on: Sequence[str] = (),
     review_by: date | None = None,
     note: str = "",
+    track_value: bool = True,
 ) -> None:
     canonical = canonical_target(target)
     _check_declaration_forbidden(canonical, depends_on)
@@ -237,6 +241,7 @@ def watch(
         note=note,
         declared_in=declared_in,
         identity=(declared_in, f"watch:{canonical}"),
+        track_value=track_value,
     )
     register(decl)
     if collect_mode():

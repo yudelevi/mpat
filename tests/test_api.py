@@ -286,6 +286,29 @@ def test_watch_registers_and_warns_on_drift(upstream, tmp_path):
     assert d.status == _registry.STATUS_WATCHED
 
 
+def test_watch_track_value_false_is_silent_when_only_the_value_changed(upstream, tmp_path):
+    locked_project(upstream, tmp_path, target="fakeup.LIMIT", track_value=False)
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 1")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        mpat.watch("fakeup.LIMIT", track_value=False)
+    d = _registry.declarations()[0]
+    assert d.track_value is False
+    assert d.status == _registry.STATUS_WATCHED
+
+
+def test_watch_track_value_false_still_warns_on_kind_change(upstream, tmp_path):
+    locked_project(upstream, tmp_path, target="fakeup.LIMIT", track_value=False)
+    upstream.edit("__init__.py", "LIMIT = 16", "def LIMIT():\n    return 16")
+    with pytest.warns(UpstreamDriftWarning, match="moved"):
+        mpat.watch("fakeup.LIMIT", track_value=False)
+
+
+def test_watch_defaults_to_tracking_value(upstream):
+    mpat.watch("fakeup.LIMIT")
+    assert _registry.declarations()[0].track_value is True
+
+
 def test_watch_unsupported_targets_are_fine(upstream):
     mpat.watch("fakeup.core.Store.size")
     mpat.watch("fakeup.core.Store")

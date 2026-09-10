@@ -35,6 +35,7 @@ class Declaration:
     declared_in: str
     identity: tuple[str, str]
     status: str = field(default=STATUS_REGISTERED)
+    track_value: bool = True
 
 
 _declarations: dict[tuple[str, str], Declaration] = {}

@@ -57,7 +57,10 @@ patching. It tracks the body of functions and classes, the getter of a
 property, and the value of scalar constants and tuples of scalars. Every other
 attribute, including dicts, lists and custom descriptors, is recorded as
 existence only, so mutating a watched registry's contents will not fail
-`mpat check`; watch the function or class that populates it instead. `until`
+`mpat check`; watch the function or class that populates it instead.
+`watch(..., track_value=False)` records that a scalar exists and its kind but not
+its value, for settings your application assigns itself; if you want the value
+pinned, put the assignment and the `watch()` in the same module. `until`
 turns the patch off once upstream is fixed; `Version` takes a requirement
 string, `Probe` takes a zero-argument callable, and both combine with `|` and
 `&`. `review_by` is a nag date only. `on_drift="warn" | "skip" | "raise"`

@@ -52,6 +52,7 @@ def watch(
     depends_on: Sequence[str] = (),
     review_by: date | None = None,
     note: str = "",
+    track_value: bool = True,
 ) -> None
 ```
 
@@ -63,6 +64,37 @@ from mpat import watch
 
 watch("somelib.settings.MAX_RETRIES", note="see somelib#98")
 ```
+
+`track_value=False` records that a scalar exists and what kind of thing it is, but not
+what it is set to. Use it for a setting your application assigns itself:
+
+```python
+import litellm
+from mpat import watch
+
+watch("litellm.drop_params", track_value=False, note="we set this in app.config")
+```
+
+The lock then carries `track_value = false` and no `value_repr`, so only a rename,
+removal or a change of kind is reported. Without it the value is unstable:
+`mpat lock` imports only `[tool.mpat] modules` and records upstream's default,
+while the pytest plugin runs after your application has imported and sees your
+override, so CI stays red no matter which one you lock.
+
+When you do want the value pinned, put the assignment and the `watch()` in the
+same module so both `mpat lock` and the test run see the same thing:
+
+```python
+import litellm
+from mpat import watch
+
+litellm.drop_params = True
+watch("litellm.drop_params", note="litellm#1234")
+```
+
+Switching `track_value` on an already locked target reports `unlocked` from
+`mpat check` until you run `mpat lock` again, the same as changing a target's
+role or `depends_on`.
 
 `watch` takes no `until` and no `on_drift`. A watched target that drifts always
 warns, and `MPAT_STRICT=1` turns that warning into an error like it does for a
