@@ -147,6 +147,26 @@ watch(
 )
 ```
 
+## Configuration file
+
+`mpat` reads its configuration from `[tool.mpat]` in `pyproject.toml` or from a
+standalone `mpat.toml` next to it. The two carry the same keys; `mpat.toml`
+drops the `[tool.mpat]` prefix, so `[[tool.mpat.watch]]` becomes `[[watch]]`.
+
+```toml
+# mpat.toml
+modules = ["myapp.patches"]
+allow = ["hashlib.new"]
+
+[[watch]]
+target = "somelib.settings.MAX_RETRIES"
+```
+
+The project root is the first directory, walking up from the working
+directory, that has either file. When both are there `mpat.toml` wins and the
+`[tool.mpat]` section is ignored. Every example below shows the `pyproject.toml`
+spelling.
+
 ## Declaring in `pyproject.toml`
 
 A watch does not need a Python module. `[[tool.mpat.watch]]` declares one in
@@ -178,7 +198,7 @@ the entry.
 
 `mpat lock`, `mpat check` and the pytest plugin register these after importing
 `[tool.mpat] modules`, so a project can have either or both. The lock entry
-carries `declared_in = "pyproject.toml"`. The target is resolved when it is
+carries `declared_in = "pyproject.toml"` (or `"mpat.toml"`). The target is resolved when it is
 locked or checked, not when the configuration is read, and the denylist applies
 to it and to its `depends_on` the same as in code.
 

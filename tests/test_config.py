@@ -219,3 +219,74 @@ def test_top_level_tool_must_be_a_table(tmp_path):
     (tmp_path / "pyproject.toml").write_text('tool = 5\n[project]\nname = "x"\n')
     with pytest.raises(MpatError, match="tool must be a table"):
         _config.load_config(tmp_path)
+
+
+def write_mpat_toml(root: Path, body: str = "") -> None:
+    (root / "mpat.toml").write_text(body)
+
+
+def test_mpat_toml_alone_is_the_config(tmp_path):
+    write_mpat_toml(
+        tmp_path, 'modules = ["a.b"]\nallow = ["ssl.x"]\n' + WATCH_ENTRY.replace("tool.mpat.", "")
+    )
+    cfg = _config.load_config(tmp_path)
+    assert cfg is not None
+    assert cfg.root == tmp_path
+    assert cfg.path == tmp_path / "mpat.toml"
+    assert cfg.declared
+    assert cfg.modules == ("a.b",)
+    assert cfg.allow == ("ssl.x",)
+    assert [w.target for w in cfg.watches] == ["fakeup.core.greet", "fakeup.REGISTRY"]
+
+
+def test_empty_mpat_toml_is_declared_but_declares_nothing(tmp_path):
+    write_mpat_toml(tmp_path)
+    cfg = _config.load_config(tmp_path)
+    assert cfg is not None
+    assert cfg.declared
+    assert not cfg.declares_anything
+
+
+def test_mpat_toml_wins_over_pyproject_in_the_same_directory(tmp_path):
+    write_pyproject(tmp_path, '[tool.mpat]\nmodules = ["from_pyproject"]\n')
+    write_mpat_toml(tmp_path, 'modules = ["from_mpat_toml"]\n')
+    cfg = _config.load_config(tmp_path)
+    assert cfg is not None
+    assert cfg.modules == ("from_mpat_toml",)
+    assert cfg.path == tmp_path / "mpat.toml"
+
+
+def test_pyproject_config_records_its_path(tmp_path):
+    write_pyproject(tmp_path, "[tool.mpat]\n")
+    cfg = _config.load_config(tmp_path)
+    assert cfg is not None
+    assert cfg.path == tmp_path / "pyproject.toml"
+
+
+def test_nearest_config_file_wins_when_walking_up(tmp_path):
+    write_mpat_toml(tmp_path, 'modules = ["outer"]\n')
+    nested = tmp_path / "svc"
+    nested.mkdir()
+    write_pyproject(nested, '[tool.mpat]\nmodules = ["inner"]\n')
+    cfg = _config.load_config(nested / "deeper_missing_dir_parent")
+    assert cfg is not None
+    assert cfg.root == nested
+    assert cfg.modules == ("inner",)
+
+
+@pytest.mark.parametrize(
+    ("body", "problem"),
+    [
+        ('modules = "a"\n', r"mpat\.toml: modules must be a list of str"),
+        ("bogus = 1\n", r"mpat\.toml: unknown key 'bogus'"),
+        (
+            '[[watch]]\ntarget = "a.b"\nnote = 1\n',
+            r"mpat\.toml: \[\[watch\]\] #0 \(a\.b\): note must be str",
+        ),
+        ("[tool.mpat]\n", r"mpat\.toml: unknown key 'tool'"),
+    ],
+)
+def test_invalid_mpat_toml_names_the_file(tmp_path, body, problem):
+    write_mpat_toml(tmp_path, body)
+    with pytest.raises(MpatError, match=problem):
+        _config.load_config(tmp_path)

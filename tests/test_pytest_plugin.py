@@ -611,3 +611,16 @@ def test_config_watches_in_two_services_are_scoped_to_their_own_service(
     )
     result.stdout.no_fnmatch_line("mpat[[]services/web[]]::*[[]fakeup.core.greet[]]*")
     result.stdout.no_fnmatch_line("mpat[[]services/api[]]::*[[]fakeup.core.Store.add[]]*")
+
+
+def test_mpat_toml_only_project_is_collected(pytester, upstream, monkeypatch):
+    root = project(pytester.path, "mpat.Probe(lambda: False)")
+    (root / "pyproject.toml").unlink()
+    (root / "mpat.toml").write_text('modules = ["app_patches"]\n')
+    monkeypatch.syspath_prepend(str(root))
+    assert _cli.main(["lock"]) == _cli.EXIT_OK
+    forget_patch_module(upstream)
+    local_test(root)
+    result = run(pytester, "-v")
+    result.assert_outcomes(passed=3)
+    result.stdout.fnmatch_lines(["*mpat::drift[[]fakeup.core.greet[]] PASSED*"])
