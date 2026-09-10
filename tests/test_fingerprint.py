@@ -271,3 +271,22 @@ def test_unreadable_source_is_no_source(upstream):
         (upstream.pkg / "core.py").chmod(0o644)
     assert f.no_source is True
     assert f.source_hash is None
+
+
+def test_conditional_definition_hashes_the_live_branch(upstream):
+    import ast
+
+    tree = ast.parse((upstream.pkg / "core.py").read_text())
+    nodes = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "twice"]
+    dead, live = sorted(nodes, key=lambda n: n.lineno)
+    assert "dead" in ast.unparse(dead)
+    assert fingerprint_of("fakeup.core.twice").source_hash == fp._hash(live)
+
+
+def test_decorated_conditional_definition_hashes_the_live_branch(upstream):
+    import ast
+
+    tree = ast.parse((upstream.pkg / "core.py").read_text())
+    nodes = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "thrice"]
+    _, live = sorted(nodes, key=lambda n: n.lineno)
+    assert fingerprint_of("fakeup.core.thrice").source_hash == fp._hash(live)

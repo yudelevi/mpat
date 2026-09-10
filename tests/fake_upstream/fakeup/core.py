@@ -66,3 +66,27 @@ class Child(Base):
 
 class Other(Base):
     pass
+
+
+if False:
+
+    def twice():
+        return "dead"
+
+else:
+
+    def twice():
+        return "live"
+
+
+if False:
+
+    @tag("dead")
+    def thrice():
+        return "dead"
+
+else:
+
+    @tag("live")
+    def thrice():
+        return "live"
