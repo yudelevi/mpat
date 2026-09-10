@@ -330,7 +330,10 @@ def request(original, self, method, url, **kwargs): ...
 ```
 
 Drift in a dependency fails `mpat check` exactly like drift in the patch target.
-It does not affect whether the patch is applied at import.
+At import it is handled by the same [`on_drift`](#on_drift) rule as the target:
+a dependency with a lock entry that no longer matches warns, skips or raises
+along with it, and the message names which entry drifted. A dependency with no
+lock entry, or one that cannot be resolved at import, is left to `mpat check`.
 
 `watch` accepts `depends_on` too.
 
@@ -378,8 +381,8 @@ goes green. See [pytest](pytest.md).
 
 ### `on_drift`
 
-What happens at import when `mpat.lock` has an entry for the target and the
-installed upstream no longer matches it.
+What happens at import when `mpat.lock` has an entry for the target, or for one
+of its `depends_on`, and the installed upstream no longer matches it.
 
 | Value | Behaviour |
 | --- | --- |
@@ -399,8 +402,8 @@ whatever each one asked for. Use it in CI and in test runs where a silent warnin
 would go unread.
 
 The import-time check needs a lockfile to compare against. `mpat` looks for the
-nearest `pyproject.toml` from the current working directory upwards and reads
-`mpat.lock` beside it. With no lockfile, or no entry for the target, nothing is
+nearest `mpat.toml` or `pyproject.toml` from the current working directory
+upwards and reads `mpat.lock` beside it. With no lockfile, or no entry for the target, nothing is
 compared and the patch is applied.
 
 `until` is evaluated before the drift check. A patch that is already unnecessary

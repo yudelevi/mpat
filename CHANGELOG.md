@@ -2,6 +2,29 @@
 
 ## 0.2.2
 
+- Configuration can live in a standalone `mpat.toml` next to `pyproject.toml`.
+  It carries the same keys without the `[tool.mpat]` prefix, so
+  `[[tool.mpat.watch]]` becomes `[[watch]]`. When both files are in the same
+  directory `mpat.toml` wins and the `[tool.mpat]` section is ignored, the rule
+  `ruff` and `ty` follow. Error messages, `declared_in` and the source column of
+  `mpat check` name whichever file the declaration came from.
+- New `mpat diff <target>` prints the drift status of one locked target and every
+  fingerprint field as `locked -> current`. It reads `mpat.lock` and resolves the
+  target without importing `[tool.mpat] modules`. Exit 2 when the target is not
+  in the lock.
+- `on_drift` and `MPAT_STRICT=1` now cover `depends_on` at import. A dependency
+  whose lock entry no longer matches warns, skips or raises together with its
+  patch, and the message says which entry drifted. Before, only `mpat check` and
+  the pytest plugin looked at dependencies.
+- `[tool.mpat] modules` and `allow` must be lists of strings, `tool.mpat` must
+  be a table, and unknown keys in the section are configuration errors. A bare
+  string in `modules` used to be split into single characters.
+- A source file that cannot be read or parsed no longer crashes `mpat lock` or
+  `mpat check`; the target is fingerprinted by signature only and marked
+  `no_source`, like a `.pyc`-only install.
+- A name defined more than once in one file, in `if`/`else` or `try`/`except`
+  branches, is now hashed at the definition that is actually live, matched by
+  the code object's first line. The first same-named definition used to win.
 - A target whose module raises `ImportError` on import now fails as a named
   configuration error (exit 2) instead of a bare traceback, and says that a
   module that has to be imported first belongs in `[tool.mpat] modules`. The new
