@@ -42,7 +42,8 @@ _OPTIONAL_STR_FIELDS = (
     "dist_version",
     "parent",
 )
-_BOOL_FIELDS = ("is_async", "no_source")
+_TRACK_VALUE_KEY = "track_value"
+_BOOL_FIELDS = ("is_async", "no_source", _TRACK_VALUE_KEY)
 
 LOCK_FILE_MODE = 0o644
 
@@ -54,6 +55,7 @@ class LockEntry:
     declared_in: str
     fingerprint: Fingerprint
     parent: str | None = None
+    track_value: bool = True
 
 
 @dataclass
@@ -68,6 +70,7 @@ class Wanted:
     role: str
     parent: str | None
     decl: Declaration
+    track_value: bool
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,8 @@ def _entry_to_dict(entry: LockEntry) -> dict[str, Any]:
     data: dict[str, Any] = {"role": entry.role, "declared_in": entry.declared_in}
     if entry.parent is not None:
         data["parent"] = entry.parent
+    if not entry.track_value:
+        data[_TRACK_VALUE_KEY] = False
     for name in _FINGERPRINT_FIELDS:
         value = getattr(entry.fingerprint, name)
         if value is not None:
@@ -133,6 +138,7 @@ def _entry_from_dict(target: str, data: Any) -> LockEntry:
             role=data["role"],
             declared_in=data["declared_in"],
             parent=data.get("parent"),
+            track_value=data.get(_TRACK_VALUE_KEY, True),
             fingerprint=Fingerprint(**fp_kwargs),
         )
     except (KeyError, TypeError) as exc:
@@ -186,13 +192,23 @@ def expand(declarations: Sequence[Declaration]) -> list[Wanted]:
     wanted: dict[str, Wanted] = {}
     for decl in declarations:
         wanted.setdefault(
-            decl.target, Wanted(target=decl.target, role=decl.role, parent=None, decl=decl)
+            decl.target,
+            Wanted(
+                target=decl.target,
+                role=decl.role,
+                parent=None,
+                decl=decl,
+                track_value=decl.track_value,
+            ),
         )
         for dep in decl.depends_on:
             if dep in primary:
                 continue
             wanted.setdefault(
-                dep, Wanted(target=dep, role=ROLE_DEPENDS, parent=decl.target, decl=decl)
+                dep,
+                Wanted(
+                    target=dep, role=ROLE_DEPENDS, parent=decl.target, decl=decl, track_value=True
+                ),
             )
     return list(wanted.values())
 
@@ -211,16 +227,17 @@ def build_lock(declarations: Sequence[Declaration], *, root: Path) -> Lock:
             role=w.role,
             declared_in=_declared_in(w.decl, root),
             parent=w.parent,
-            fingerprint=fingerprint(resolve(w.target)),
+            track_value=w.track_value,
+            fingerprint=fingerprint(resolve(w.target), track_value=w.track_value),
         )
         for w in expand(declarations)
     }
     return Lock(entries=entries)
 
 
-def _current(target: str) -> Fingerprint | None:
+def _current(target: str, *, track_value: bool) -> Fingerprint | None:
     try:
-        return fingerprint(resolve(target))
+        return fingerprint(resolve(target), track_value=track_value)
     except TargetNotFound:
         return None
 
@@ -243,8 +260,10 @@ def check(
         seen.add(w.target)
         declared_in = _declared_in(w.decl, root)
         entry = lock.entries.get(w.target)
-        current = _current(w.target)
-        if entry is not None and (entry.role != w.role or entry.parent != w.parent):
+        current = _current(w.target, track_value=w.track_value)
+        if entry is not None and (
+            entry.role != w.role or entry.parent != w.parent or entry.track_value != w.track_value
+        ):
             entry = None
         if entry is None:
             results.append(

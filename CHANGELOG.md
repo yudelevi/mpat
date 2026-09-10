@@ -11,6 +11,12 @@
   importable when you lock.
 - New `mpat.apply_all()`, which imports every module a `when_imported` patch is
   still waiting on and so applies them all now.
+- New `watch(..., track_value=False)` records a scalar's existence and kind but not
+  its value. Use it for an upstream setting your application assigns itself,
+  where `mpat lock` sees upstream's default and the pytest plugin sees your
+  override. The lock entry carries `track_value = false` and no `value_repr`, and
+  changing `track_value` on a locked target reports `unlocked` until the next
+  `mpat lock`, like a role or `depends_on` change.
 
 ## 0.2.0
 

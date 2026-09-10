@@ -97,6 +97,16 @@ Watch the code that populates the registry instead.
 watch("somelib.plugins.register_defaults")
 ```
 
+## Why does a watched setting drift in CI but not in pre-commit?
+
+Because the two runs see different values. `mpat lock` imports only the modules
+in `[tool.mpat] modules`, so it records upstream's default. The pytest plugin
+collects after your application has imported, so it sees whatever your
+application assigned, for example `litellm.drop_params = True`. Declare the watch
+with `track_value=False` to track only that the attribute exists and is still a scalar,
+or move the assignment into the module that declares the watch so both runs
+see the same value. See [Usage](usage.md#watch).
+
 Functions defined inside other functions are the other gap. Their `__qualname__`
 contains `<locals>`, so they cannot be located in the module's AST and get no body
 hash. That case is at least visible: the entry is locked with `no_source = true`

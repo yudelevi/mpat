@@ -224,3 +224,22 @@ def test_namespace_package_second_portion_is_relative(tmp_path, monkeypatch):
     assert len(list(nsp2.__path__)) == 2
     assert fingerprint_of("nsp2.two.hello").source_file == "nsp2/two/__init__.py"
     assert fingerprint_of("nsp2.one.hello").source_file == "nsp2/one/__init__.py"
+
+
+def test_track_value_false_records_existence_only(upstream):
+    a = fp.fingerprint(resolve("fakeup.LIMIT"), track_value=False)
+    assert a.kind == fp.KIND_ATTRIBUTE
+    assert a.resolved == "fakeup.LIMIT"
+    assert a.value_repr is None
+    assert fingerprint_of("fakeup.LIMIT").value_repr == "16"
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 500")
+    after = fp.fingerprint(resolve("fakeup.LIMIT"), track_value=False)
+    assert fp.compare(locked=a, current=after) == fp.OK
+
+
+def test_track_value_false_still_reports_kind_change(upstream):
+    before = fp.fingerprint(resolve("fakeup.LIMIT"), track_value=False)
+    upstream.edit("__init__.py", "LIMIT = 16", "def LIMIT():\n    return 16")
+    after = fp.fingerprint(resolve("fakeup.LIMIT"), track_value=False)
+    assert after.kind == fp.KIND_FUNCTION
+    assert fp.compare(locked=before, current=after) == fp.MOVED
