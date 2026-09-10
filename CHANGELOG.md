@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 - New `patch(..., when_imported=True)`. The declaration registers without
   importing the target; the patch is applied by a post-import hook the first
