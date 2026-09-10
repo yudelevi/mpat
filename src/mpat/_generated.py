@@ -18,7 +18,10 @@ from mpat._registry import Declaration, collect_declarations
 UNCONFIGURED_TARGET = "<unconfigured>"
 UNCONFIGURED_ROLE = "config"
 UNCONFIGURED_STATUS = "unconfigured"
-UNCONFIGURED_NOTE = "no [tool.mpat] modules found; add modules to pyproject.toml"
+UNCONFIGURED_NOTE = (
+    "[tool.mpat] declares nothing; add modules, [[tool.mpat.watch]] or "
+    "[[tool.mpat.override]] to pyproject.toml"
+)
 
 
 @dataclass(frozen=True)

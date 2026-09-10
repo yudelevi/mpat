@@ -89,7 +89,7 @@ def test_empty_modules_collects_one_failing_item(pytester):
     result = run(pytester)
     result.assert_outcomes(failed=1)
     result.stdout.fnmatch_lines(
-        ["*unconfigured*", "*no [[]tool.mpat[]] modules found; add modules to pyproject.toml"]
+        ["*unconfigured*", "*[[]tool.mpat[]] declares nothing; add modules, *"]
     )
 
 

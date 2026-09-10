@@ -101,7 +101,7 @@ entries collects one item, and it fails:
 ```
 FAILED mpat::unconfigured
   <unconfigured>: unconfigured.
-    no [tool.mpat] modules found; add modules to pyproject.toml
+    [tool.mpat] declares nothing; add modules, [[tool.mpat.watch]] or [[tool.mpat.override]] to pyproject.toml
 ```
 
 It fails rather than skipping on purpose. A typo in the module list would
