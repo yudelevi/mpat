@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- `mpat check --gitlab` renders the non-OK results as a GitLab Code Quality
+  report, so drift is listed in the merge request instead of only in the job
+  log. `location.path` is resolved against the repository root rather than the
+  mpat root, because GitLab reads it relative to the checkout: a run inside
+  `services/api` reports `services/api/src/patches.py`, not `src/patches.py`.
+  The root is the nearest ancestor holding `.git`, which `--repo-root PATH`
+  overrides. `--gitlab` and `--json` are mutually exclusive, and the exit code
+  is unchanged, so the CI job needs `artifacts: when: always` to upload the
+  report on the run that fails.
+
 ## 0.2.2
 
 - Configuration can live in a standalone `mpat.toml` next to `pyproject.toml`.

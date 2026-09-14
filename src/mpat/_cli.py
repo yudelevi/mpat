@@ -22,6 +22,7 @@ from mpat._fingerprint import (
     compare,
     fingerprint,
 )
+from mpat._gitlab import code_quality_report
 from mpat._lock import (
     LOCK_FILENAME,
     MISSING,
@@ -167,6 +168,13 @@ def cmd_check(args: argparse.Namespace) -> int:
     )
     if args.json:
         print(json.dumps([dataclasses.asdict(r) for r in results], indent=_JSON_INDENT))
+    elif args.gitlab:
+        print(
+            json.dumps(
+                code_quality_report(results, root=config.root, base=args.repo_root),
+                indent=_JSON_INDENT,
+            )
+        )
     elif not results:
         print(_NO_DECLARATIONS)
     else:
@@ -218,7 +226,19 @@ def _parser() -> argparse.ArgumentParser:
     lock_parser = sub.add_parser("lock", help="fingerprint declared targets and write mpat.lock")
     lock_parser.set_defaults(fn=cmd_lock)
     check_parser = sub.add_parser("check", help="compare mpat.lock against installed upstream")
-    check_parser.add_argument("--json", action="store_true")
+    output = check_parser.add_mutually_exclusive_group()
+    output.add_argument("--json", action="store_true")
+    output.add_argument(
+        "--gitlab",
+        action="store_true",
+        help="print a GitLab Code Quality report of every non-ok target",
+    )
+    check_parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=None,
+        help="base for report paths (default: the nearest .git above the mpat root)",
+    )
     check_parser.set_defaults(fn=cmd_check)
     show_parser = sub.add_parser("show", help="print fingerprint and source of a target")
     show_parser.add_argument("target")

@@ -135,6 +135,57 @@ $ mpat check --json
 The list is in declaration order, with `stale` entries appended. Exit codes are
 the same as for the table.
 
+### `--gitlab`
+
+Prints a [GitLab Code Quality](https://docs.gitlab.com/ci/testing/code_quality/)
+report of every target that is not `ok`, so drift shows up on the merge request
+instead of only in the job log.
+
+```
+$ mpat check --gitlab
+[
+  {
+    "description": "patch somelib.client.Client.request: the upstream body changed (Works around somelib#123.)",
+    "check_name": "mpat/body",
+    "fingerprint": "8f14e45fceea167a5a36dedd4bea2543...",
+    "severity": "major",
+    "location": {
+      "path": "services/api/myapp/patches.py",
+      "lines": {"begin": 12}
+    }
+  }
+]
+```
+
+`missing` and `moved` are `blocker`, the fingerprint mismatches and `unlocked`
+are `major`, `no_source` and `review` are `minor`, `stale` is `info`. The
+fingerprint is a hash of the path, role and target, so the same drift keeps the
+same identity between runs and GitLab does not report it twice.
+
+GitLab reads `location.path` relative to the repository root, but `mpat check`
+runs where the configuration file is, which in a monorepo is a subdirectory. So
+the paths are resolved against the nearest directory above the `mpat` root that
+has a `.git`, and `--repo-root PATH` overrides that for a checkout where the two
+do not line up. Getting this wrong is silent: GitLab drops annotations whose
+path does not exist rather than reporting them.
+
+`location.lines.begin` is the first line of the declaring file that mentions the
+target in quotes, and line 1 when there is none, which is what happens for a
+target declared as an object rather than a dotted string.
+
+The report goes to stdout, and `mpat check` still exits 1 on drift, so the job
+has to keep the artifact anyway:
+
+```yaml
+mpat:
+  script:
+    - mpat check --gitlab > gl-code-quality.json
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality.json
+```
+
 ## `mpat show`
 
 Prints a target's fingerprint and its source. It takes a dotted path directly and

@@ -119,6 +119,7 @@ next to it. `mpat.toml` wins when both exist.
 mpat lock     # fingerprint everything, write mpat.lock, commit it
 mpat check    # exit 1 unless every target is ok
 mpat check --json
+mpat check --gitlab   # GitLab Code Quality report
 mpat show somelib.client.Client.request
 mpat diff somelib.client.Client.request
 ```
