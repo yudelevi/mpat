@@ -1,7 +1,15 @@
 # Changelog
 
-## 0.3.0
+## 0.3.1
 
+- A watch can name a file shipped inside an installed package:
+  `file = "nicegui/elements/select.js"` in a `[[tool.mpat.watch]]` table, or
+  `watch("nicegui/elements/select.js")` from code. The lock records the sha256
+  of the file's bytes with kind `file`, and `mpat check` reports the new
+  `content` status when they change, whitespace included, so a fork of an
+  upstream JavaScript or template file gets re-diffed on the bump that touched
+  it instead of when someone notices. Files can be watched, not patched or
+  overridden.
 - `mpat check --gitlab` renders the non-OK results as a GitLab Code Quality
   report, so drift is listed in the merge request instead of only in the job
   log. `location.path` is resolved against the repository root rather than the
@@ -114,3 +122,8 @@
 ## 0.1.0
 
 First release. See https://github.com/yudelevi/mpat/releases/tag/v0.1.0.
+
+
+## 0.3.0
+
+- `mpat check --gitlab`

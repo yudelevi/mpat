@@ -61,7 +61,10 @@ existence only, so mutating a watched registry's contents will not fail
 `watch(..., track_value=False)` records that a scalar exists and its kind but not
 its value, for settings your application assigns itself; if you want the value
 pinned, put the assignment and the `watch()` in the same module.
-`review_by` is a nag date only. `on_drift="warn" | "skip" | "raise"`
+A watch can also name a file inside an installed package,
+`watch("nicegui/elements/select.js")` or `file = "..."` in a `[[tool.mpat.watch]]`
+table, and reports `content` when its bytes change; use it for upstream files you
+forked. `review_by` is a nag date only. `on_drift="warn" | "skip" | "raise"`
 decides what happens at import when the lock no longer matches; `MPAT_STRICT=1`
 forces `raise`. Passing a target as an object instead of a dotted string works
 too, resolved through `__module__` and `__qualname__`. Two dotted targets that

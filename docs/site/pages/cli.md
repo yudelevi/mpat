@@ -78,6 +78,7 @@ With no declarations at all it prints `no declarations found` and exits 0.
 | `moved` | The target now resolves elsewhere, or its source file changed. |
 | `signature` | The signature changed, or the target switched between sync and async. |
 | `body` | The source hash changed. |
+| `content` | A watched file's bytes changed. |
 | `value` | A watched constant's value changed. |
 | `no_source` | The locked source is no longer readable, so only the signature is still comparable. |
 | `missing` | The target no longer exists upstream. |

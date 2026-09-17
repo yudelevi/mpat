@@ -60,13 +60,13 @@ no_source = false
 | `declared_in` | The file the declaration came from, relative to the project root, or the configuration file (`pyproject.toml` or `mpat.toml`) for a watch or override table |
 | `parent` | Present on `depends_on` entries only, naming the target that declared it |
 | `track_value` | `false` when the target was declared with `watch(..., track_value=False)` or as a `[[tool.mpat.override]]`; omitted otherwise |
-| `kind` | `function`, `class`, `attribute` or `module` |
+| `kind` | `function`, `class`, `attribute`, `module` or `file` |
 | `resolved` | Where the target actually resolved to, which is not always where you named it |
 | `is_async` | True for coroutine functions |
 | `signature` | `inspect.signature` of the object, for functions |
-| `source_hash` | `sha256:` of the unparsed AST node of the definition |
+| `source_hash` | `sha256:` of the unparsed AST node of the definition, or of the raw bytes for a `file` |
 | `value_repr` | `repr()` of a scalar or tuple-of-scalars attribute, or `<unhashable>` |
-| `source_file` | The source file, relative to the installed package's root |
+| `source_file` | The source file, relative to the installed package's root; for a `file` entry, the watched path itself |
 | `dist` | The distribution that installs the target's top-level package |
 | `dist_version` | The installed version of that distribution |
 | `no_source` | True when the target should have had a source hash and did not |
@@ -85,7 +85,8 @@ old name, the dotted path you wrote stays the same while `resolved` changes, and
 `source_hash` is the hash of the source, not of the compiled object. A reformat
 that changes only whitespace or comments does not change it, because the AST is
 unparsed before hashing. A change to a default value, a renamed local, or a new
-line of logic does.
+line of logic does. A `file` entry is the exception: its hash covers the raw
+bytes, so any change at all reports `content`.
 
 ## Targets without source
 

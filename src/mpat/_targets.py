@@ -5,6 +5,8 @@ import inspect
 import types
 from collections.abc import Sequence
 from dataclasses import dataclass
+from importlib import resources
+from importlib.resources.abc import Traversable
 from typing import Any
 
 from mpat._errors import (
@@ -33,6 +35,7 @@ GEN = "gen"
 ASYNCGEN = "asyncgen"
 
 _DESCRIPTORS = (staticmethod, classmethod)
+FILE_SEPARATOR = "/"
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,20 @@ class Resolved:
     static: Any
     obj: Any
     descriptor: type | None
+
+
+@dataclass(frozen=True)
+class ResolvedFile:
+    target: str
+    package: str
+    path: Traversable
+
+    def read_bytes(self) -> bytes:
+        return self.path.read_bytes()
+
+
+def is_file_target(target: str) -> bool:
+    return FILE_SEPARATOR in target
 
 
 def canonical_target(target: str | object) -> str:
@@ -76,7 +93,22 @@ def _import_failed(*, target: str, exc: ImportError) -> TargetImportError:
     )
 
 
-def resolve(target: str) -> Resolved:
+def resolve_file(target: str) -> ResolvedFile:
+    package, _, relative = target.partition(FILE_SEPARATOR)
+    _import_prefix([package], target=target)
+    path = resources.files(package).joinpath(relative)
+    if not path.is_file():
+        raise TargetNotFound(f"{target!r}: not a file in the installed {package!r} package")
+    return ResolvedFile(target=target, package=package, path=path)
+
+
+def resolve(target: str) -> Resolved | ResolvedFile:
+    if is_file_target(target):
+        return resolve_file(target)
+    return _resolve_attribute(target)
+
+
+def _resolve_attribute(target: str) -> Resolved:
     module, rest = _import_prefix(target.split("."), target=target)
     if not rest:
         raise TargetNotFound(f"{target!r} is a module, not an attribute of one")
@@ -104,6 +136,13 @@ def resolve(target: str) -> Resolved:
     )
 
 
+def resolve_attribute(target: str) -> Resolved:
+    """Resolve a target that must be a module attribute, refusing a file."""
+    if is_file_target(target):
+        raise UnsupportedTarget(f"{target}: a file cannot be patched; use watch() instead")
+    return _resolve_attribute(target)
+
+
 def check_supported(resolved: Resolved) -> None:
     if inspect.isclass(resolved.parent) and not any(
         resolved.attr in vars(cls) for cls in resolved.parent.__mro__
@@ -117,7 +156,7 @@ def check_supported(resolved: Resolved) -> None:
 
 
 def _matches(target: str, prefix: str) -> bool:
-    return target == prefix or target.startswith(prefix + ".")
+    return target == prefix or target.startswith((prefix + ".", prefix + FILE_SEPARATOR))
 
 
 def check_forbidden(target: str, *, allow: Sequence[str] = ()) -> None:
