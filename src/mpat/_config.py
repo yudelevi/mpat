@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from mpat._errors import MpatError
+from mpat._targets import FILE_SEPARATOR, is_file_target
 
 PYPROJECT = "pyproject.toml"
 CONFIG_FILENAME = "mpat.toml"
@@ -21,6 +22,7 @@ _MODULES = "modules"
 _ALLOW = "allow"
 _SECTION_KEYS = frozenset({_MODULES, _ALLOW, WATCH_KEY, OVERRIDE_KEY})
 _TARGET = "target"
+_FILE = "file"
 _DEPENDS_ON = "depends_on"
 _REVIEW_BY = "review_by"
 _NOTE = "note"
@@ -29,6 +31,7 @@ _UNTIL = "until"
 _TOML_SCALARS = (int, float, str, bool)
 _WATCH_FIELDS: dict[str, type | tuple[type, ...]] = {
     _TARGET: str,
+    _FILE: str,
     _DEPENDS_ON: list,
     _UNTIL: str,
     _REVIEW_BY: date,
@@ -150,7 +153,11 @@ def _type_name(expected: type | tuple[type, ...]) -> str:
 
 
 def _entries(
-    source: _Source, section: Mapping[str, Any], key: str
+    source: _Source,
+    section: Mapping[str, Any],
+    key: str,
+    *,
+    name_keys: tuple[str, ...] = (_TARGET,),
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     raw = section.get(key, [])
     if not isinstance(raw, list):
@@ -163,10 +170,13 @@ def _entries(
             raise _entry_error(
                 source, key, f"#{index}", f"must be a table, got {type(data).__name__}"
             )
-        target = data.get(_TARGET)
+        present = [name for name in name_keys if name in data]
+        target = data.get(present[0]) if present else None
         label = f"#{index}" if not isinstance(target, str) else f"#{index} ({target})"
-        if _TARGET not in data:
-            raise _entry_error(source, key, label, f"missing {_TARGET}")
+        if not present:
+            raise _entry_error(source, key, label, f"missing {' or '.join(name_keys)}")
+        if len(present) > 1:
+            raise _entry_error(source, key, label, f"{' and '.join(present)} are exclusive")
         yield label, data
 
 
@@ -175,8 +185,12 @@ def _watch_spec(source: _Source, label: str, data: dict[str, Any]) -> WatchSpec:
     depends_on = data.get(_DEPENDS_ON, [])
     if not all(isinstance(dep, str) for dep in depends_on):
         raise _entry_error(source, WATCH_KEY, label, f"{_DEPENDS_ON} must be a list of str")
+    if _FILE in data and not is_file_target(data[_FILE]):
+        raise _entry_error(
+            source, WATCH_KEY, label, f"{_FILE} must be a {FILE_SEPARATOR}-separated path"
+        )
     return WatchSpec(
-        target=data[_TARGET],
+        target=data.get(_TARGET, data.get(_FILE)),
         depends_on=tuple(depends_on),
         until=data.get(_UNTIL),
         review_by=data.get(_REVIEW_BY),
@@ -188,6 +202,8 @@ def _override_spec(source: _Source, label: str, data: dict[str, Any]) -> Overrid
     _typed_fields(source, OVERRIDE_KEY, label, data, _OVERRIDE_FIELDS)
     if _VALUE not in data:
         raise _entry_error(source, OVERRIDE_KEY, label, f"missing {_VALUE}")
+    if is_file_target(data[_TARGET]):
+        raise _entry_error(source, OVERRIDE_KEY, label, "a file cannot be overridden")
     return OverrideSpec(
         target=data[_TARGET],
         value=data[_VALUE],
@@ -243,7 +259,8 @@ def load_config(start: Path | None = None) -> Config | None:
     source, section, declared = _section(path)
     _known_keys(source, section)
     watches = tuple(
-        _watch_spec(source, label, entry) for label, entry in _entries(source, section, WATCH_KEY)
+        _watch_spec(source, label, entry)
+        for label, entry in _entries(source, section, WATCH_KEY, name_keys=(_TARGET, _FILE))
     )
     overrides = tuple(
         _override_spec(source, label, entry)

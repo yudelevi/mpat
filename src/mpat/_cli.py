@@ -13,6 +13,7 @@ from mpat._config import CONFIG_FILENAME, PYPROJECT, Config, load_config
 from mpat._errors import LockError, MpatError, TargetNotFound
 from mpat._fingerprint import (
     BODY,
+    CONTENT,
     MOVED,
     NO_SOURCE,
     OK,
@@ -38,7 +39,7 @@ from mpat._lock import (
     write_lock,
 )
 from mpat._registry import collect_declarations
-from mpat._targets import resolve
+from mpat._targets import ResolvedFile, resolve
 
 EXIT_OK = 0
 EXIT_DRIFT = 1
@@ -57,7 +58,7 @@ _NO_SOURCE_MARKER = " [signature-only]"
 _NO_SOURCE_NOTICE = "no source available, only the signature is locked"
 _NO_DIST = "(no distribution)"
 _MISSING_CELL = "(missing)"
-_DRIFT_STATUSES = (MISSING, MOVED, SIGNATURE, BODY, VALUE, NO_SOURCE)
+_DRIFT_STATUSES = (MISSING, MOVED, SIGNATURE, BODY, CONTENT, VALUE, NO_SOURCE)
 _FOOTERS: tuple[tuple[tuple[str, ...], str], ...] = (
     ((UNLOCKED,), "unlocked: run 'mpat lock'"),
     (
@@ -186,10 +187,13 @@ def cmd_show(args: argparse.Namespace) -> int:
     resolved = resolve(args.target)
     for name, value in dataclasses.asdict(fingerprint(resolved)).items():
         print(f"{name}: {value}")
-    try:
-        source = inspect.getsource(resolved.obj)
-    except (OSError, TypeError):
-        source = "(no source available)"
+    if isinstance(resolved, ResolvedFile):
+        source = resolved.read_bytes().decode("utf-8", errors="replace")
+    else:
+        try:
+            source = inspect.getsource(resolved.obj)
+        except (OSError, TypeError):
+            source = "(no source available)"
     print()
     print(source)
     return EXIT_OK

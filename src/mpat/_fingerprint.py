@@ -12,18 +12,20 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from mpat._targets import ASYNC, ASYNCGEN, Resolved, callable_kind
+from mpat._targets import ASYNC, ASYNCGEN, Resolved, ResolvedFile, callable_kind
 
 KIND_FUNCTION = "function"
 KIND_CLASS = "class"
 KIND_ATTRIBUTE = "attribute"
 KIND_MODULE = "module"
+KIND_FILE = "file"
 UNHASHABLE = "<unhashable>"
 
 OK = "ok"
 MOVED = "moved"
 SIGNATURE = "signature"
 BODY = "body"
+CONTENT = "content"
 VALUE = "value"
 NO_SOURCE = "no_source"
 
@@ -87,7 +89,11 @@ def _definition_node(
 
 
 def _hash(node: ast.AST) -> str:
-    return HASH_PREFIX + hashlib.sha256(ast.unparse(node).encode()).hexdigest()
+    return _hash_bytes(ast.unparse(node).encode())
+
+
+def _hash_bytes(data: bytes) -> str:
+    return HASH_PREFIX + hashlib.sha256(data).hexdigest()
 
 
 def _source_file(obj: Any) -> str | None:
@@ -188,7 +194,21 @@ def _signature(obj: Any) -> str | None:
         return None
 
 
-def fingerprint(resolved: Resolved, *, track_value: bool = True) -> Fingerprint:
+def _fingerprint_file(resolved: ResolvedFile) -> Fingerprint:
+    dist, dist_version = _dist(resolved.package)
+    return Fingerprint(
+        kind=KIND_FILE,
+        resolved=resolved.target,
+        source_hash=_hash_bytes(resolved.read_bytes()),
+        source_file=resolved.target,
+        dist=dist,
+        dist_version=dist_version,
+    )
+
+
+def fingerprint(resolved: Resolved | ResolvedFile, *, track_value: bool = True) -> Fingerprint:
+    if isinstance(resolved, ResolvedFile):
+        return _fingerprint_file(resolved)
     obj = resolved.obj
     kind = _kind(obj)
     name = _resolved_name(resolved, kind)
@@ -241,5 +261,5 @@ def compare(*, locked: Fingerprint, current: Fingerprint) -> str:
     if locked.source_hash is not None and current.source_hash is None:
         return NO_SOURCE
     if locked.source_hash != current.source_hash:
-        return BODY
+        return CONTENT if locked.kind == KIND_FILE else BODY
     return OK

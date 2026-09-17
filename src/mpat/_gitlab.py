@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from mpat._fingerprint import BODY, MOVED, NO_SOURCE, OK, SIGNATURE, VALUE
+from mpat._fingerprint import BODY, CONTENT, MOVED, NO_SOURCE, OK, SIGNATURE, VALUE
 from mpat._lock import MISSING, REVIEW, STALE, UNLOCKED, CheckResult
 
 SEVERITY_BLOCKER = "blocker"
@@ -23,6 +23,7 @@ _SEVERITIES = {
     MOVED: SEVERITY_BLOCKER,
     SIGNATURE: SEVERITY_MAJOR,
     BODY: SEVERITY_MAJOR,
+    CONTENT: SEVERITY_MAJOR,
     VALUE: SEVERITY_MAJOR,
     UNLOCKED: SEVERITY_MAJOR,
     NO_SOURCE: SEVERITY_MINOR,
@@ -36,6 +37,7 @@ _DESCRIPTIONS = {
     MOVED: "moved upstream",
     SIGNATURE: "the upstream signature changed",
     BODY: "the upstream body changed",
+    CONTENT: "the upstream file changed",
     VALUE: "the upstream value changed",
     NO_SOURCE: "upstream source is unavailable, only the signature is locked",
     UNLOCKED: f"not in the lock; run '{_CHECK_NAME_PREFIX} lock'",

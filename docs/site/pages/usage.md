@@ -180,7 +180,7 @@ review_by = 2026-12-01
 note = "protobuf timeout wrapper in data/qdrant.py relies on this shape"
 ```
 
-`target` is required. `depends_on`, `until`, `review_by` and `note` are
+Exactly one of `target` or `file` is required. `depends_on`, `until`, `review_by` and `note` are
 optional and mean what they mean on [`watch()`](#watch); `review_by` is a bare
 TOML date. `until` is a string in one of two forms:
 
@@ -201,6 +201,27 @@ the entry.
 carries `declared_in = "pyproject.toml"` (or `"mpat.toml"`). The target is resolved when it is
 locked or checked, not when the configuration is read, and the denylist applies
 to it and to its `depends_on` the same as in code.
+
+### Files
+
+A watch can name a file shipped inside an installed package instead of a Python
+symbol. Use it for something you copied out of upstream and maintain a fork of,
+such as a JavaScript or template file a Python UI framework ships:
+
+```toml
+[[tool.mpat.watch]]
+file = "nicegui/elements/select.js"
+until = "nicegui>=3.18"
+note = "forked into app/static/industry_select.js; re-diff on drift"
+```
+
+The first path segment is the package, imported to find where it is installed;
+the rest is the path inside it, with `/` as the separator. The lock records the
+`sha256` of the file's bytes and the distribution version, and `mpat check`
+reports `content` when the bytes change, including a whitespace-only change,
+because the point is to prompt a re-diff of the fork. A file that disappears
+reports `missing`. Files cannot be patched or overridden, only watched, and
+`watch("nicegui/elements/select.js")` from code does the same thing.
 
 ### Overrides
 

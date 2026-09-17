@@ -46,11 +46,13 @@ from mpat._targets import (
     ASYNCGEN,
     GEN,
     Resolved,
+    ResolvedFile,
     callable_kind,
     canonical_target,
     check_forbidden,
     check_supported,
     resolve,
+    resolve_attribute,
 )
 from mpat._until import Until
 
@@ -93,14 +95,14 @@ def _check_declaration_forbidden(canonical: str, depends_on: Sequence[str]) -> N
         check_forbidden(canonical_target(dep), allow=allow)
 
 
-def _dependency(target: str) -> Resolved | None:
+def _dependency(target: str) -> Resolved | ResolvedFile | None:
     try:
         return resolve(target)
     except (TargetNotFound, ImportError):
         return None
 
 
-def _drifted(decl: Declaration, resolved: Resolved) -> list[tuple[str, str]]:
+def _drifted(decl: Declaration, resolved: Resolved | ResolvedFile) -> list[tuple[str, str]]:
     lock = runtime_lock()
     if lock is None:
         return []
@@ -127,7 +129,7 @@ def _drift_detail(decl: Declaration, drifted: Sequence[tuple[str, str]]) -> str:
     return ", ".join(f"{target}: {status}" for target, status in drifted)
 
 
-def _handle_drift(decl: Declaration, resolved: Resolved) -> bool:
+def _handle_drift(decl: Declaration, resolved: Resolved | ResolvedFile) -> bool:
     """Return True when the patch should still be applied."""
     drifted = _drifted(decl, resolved)
     if not drifted:
@@ -210,7 +212,7 @@ def _check_kind(fn: Replacement, resolved: Resolved) -> None:
 
 
 def _resolve_patchable(canonical: str) -> Resolved:
-    resolved = resolve(canonical)
+    resolved = resolve_attribute(canonical)
     check_supported(resolved)
     return resolved
 
@@ -307,7 +309,7 @@ def apply_overrides() -> None:
     for spec in config.overrides:
         if spec.target in done:
             continue
-        resolved = resolve(spec.target)
+        resolved = resolve_attribute(spec.target)
         _handle_drift(by_target[spec.target], resolved)
         if type(resolved.static) is not type(spec.value):
             raise UnsupportedTarget(
