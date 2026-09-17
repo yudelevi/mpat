@@ -3,12 +3,12 @@ from datetime import date
 import pytest
 
 import mpat
+from mpat import _config, _lock, _registry
 from mpat import _fingerprint as fp
-from mpat import _lock
 from mpat._cli import main
-from mpat._errors import TargetNotFound, UnsupportedTarget
+from mpat._errors import ForbiddenTarget, MpatError, TargetNotFound, UnsupportedTarget
 from mpat._registry import ROLE_WATCH, Declaration
-from mpat._targets import ResolvedFile, resolve, resolve_attribute
+from mpat._targets import ResolvedFile, check_forbidden, resolve, resolve_attribute
 
 FILE = "fakeup/static/widget.js"
 TODAY = date(2026, 9, 17)
@@ -109,7 +109,7 @@ def test_lock_and_check_file(upstream, tmp_path):
 
 def test_watch_api_accepts_file(upstream):
     mpat.watch(FILE, note="forked into app/select.js")
-    targets = [d.target for d in mpat._registry.declarations()]
+    targets = [d.target for d in _registry.declarations()]
     assert FILE in targets
 
 
@@ -117,7 +117,7 @@ def test_config_file_key(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         '[[tool.mpat.watch]]\nfile = "nicegui/elements/select.js"\nnote = "forked"\n'
     )
-    cfg = mpat._config.load_config(tmp_path)
+    cfg = _config.load_config(tmp_path)
     assert cfg is not None
     assert cfg.watches[0].target == "nicegui/elements/select.js"
     assert cfg.watches[0].note == "forked"
@@ -134,8 +134,8 @@ def test_config_file_key(tmp_path):
 )
 def test_config_file_key_rejects(tmp_path, body):
     (tmp_path / "pyproject.toml").write_text(body)
-    with pytest.raises(mpat._errors.MpatError, match=r"tool\.mpat"):
-        mpat._config.load_config(tmp_path)
+    with pytest.raises(MpatError, match=r"tool\.mpat"):
+        _config.load_config(tmp_path)
 
 
 def test_cli_lock_check_diff_show_file(upstream, tmp_path, capsys):
@@ -154,16 +154,16 @@ def test_cli_lock_check_diff_show_file(upstream, tmp_path, capsys):
 
 
 def test_denylist_covers_file_targets():
-    with pytest.raises(mpat._errors.ForbiddenTarget):
-        mpat._targets.check_forbidden("ssl/cert.pem")
+    with pytest.raises(ForbiddenTarget):
+        check_forbidden("ssl/cert.pem")
 
 
 def test_override_rejects_file_target(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         '[[tool.mpat.override]]\ntarget = "a/b.js"\nvalue = 1\n'
     )
-    with pytest.raises(mpat._errors.MpatError, match="cannot be overridden"):
-        mpat._config.load_config(tmp_path)
+    with pytest.raises(MpatError, match="cannot be overridden"):
+        _config.load_config(tmp_path)
 
 
 def test_pytest_plugin_reports_file_drift(pytester, upstream, monkeypatch):

@@ -18,7 +18,7 @@ def test_canonical_from_object(upstream):
 
 
 def test_resolve_module_function(upstream):
-    r = _targets.resolve("fakeup.core.greet")
+    r = _targets.resolve_attribute("fakeup.core.greet")
     import fakeup.core
 
     assert r.parent is fakeup.core
@@ -28,31 +28,31 @@ def test_resolve_module_function(upstream):
 
 
 def test_resolve_static_and_class_methods(upstream):
-    s = _targets.resolve("fakeup.core.Store.double")
+    s = _targets.resolve_attribute("fakeup.core.Store.double")
     assert s.descriptor is staticmethod
     assert s.obj(2) == 4
-    c = _targets.resolve("fakeup.core.Store.build")
+    c = _targets.resolve_attribute("fakeup.core.Store.build")
     assert c.descriptor is classmethod
 
 
 def test_resolve_lazy_module_getattr(upstream):
-    r = _targets.resolve("fakeup.lazy_greet")
+    r = _targets.resolve_attribute("fakeup.lazy_greet")
     assert r.obj.__name__ == "greet"
 
 
 def test_resolve_missing_attr(upstream):
     with pytest.raises(TargetNotFound):
-        _targets.resolve("fakeup.core.nope")
+        _targets.resolve_attribute("fakeup.core.nope")
 
 
 def test_resolve_missing_module():
     with pytest.raises(TargetNotFound):
-        _targets.resolve("definitely_not_a_module.thing")
+        _targets.resolve_attribute("definitely_not_a_module.thing")
 
 
 def test_resolve_module_only_is_error(upstream):
     with pytest.raises(TargetNotFound):
-        _targets.resolve("fakeup.core")
+        _targets.resolve_attribute("fakeup.core")
 
 
 def test_resolve_propagates_real_import_errors(upstream):
@@ -62,7 +62,7 @@ def test_resolve_propagates_real_import_errors(upstream):
         "import not_installed_xyz\nfrom fakeup.deco import tag",
     )
     with pytest.raises(TargetImportError, match="not_installed_xyz"):
-        _targets.resolve("fakeup.core.greet")
+        _targets.resolve_attribute("fakeup.core.greet")
 
 
 def test_resolve_reports_import_error_raised_inside_the_target_module(upstream):
@@ -72,7 +72,7 @@ def test_resolve_reports_import_error_raised_inside_the_target_module(upstream):
         "from fakeup.deco import tag, gone",
     )
     with pytest.raises(TargetImportError, match=r"\[tool.mpat\] modules"):
-        _targets.resolve("fakeup.core.greet")
+        _targets.resolve_attribute("fakeup.core.greet")
 
 
 @pytest.mark.parametrize(
@@ -81,7 +81,7 @@ def test_resolve_reports_import_error_raised_inside_the_target_module(upstream):
 )
 def test_unsupported_targets(upstream, target):
     with pytest.raises(UnsupportedTarget):
-        _targets.check_supported(_targets.resolve(target))
+        _targets.check_supported(_targets.resolve_attribute(target))
 
 
 def test_metaclass_attribute_unsupported(upstream):
@@ -92,7 +92,7 @@ def test_metaclass_attribute_unsupported(upstream):
         "class Store(metaclass=Meta):",
     )
     with pytest.raises(UnsupportedTarget):
-        _targets.check_supported(_targets.resolve("fakeup.core.Store.meta_only"))
+        _targets.check_supported(_targets.resolve_attribute("fakeup.core.Store.meta_only"))
 
 
 def test_supported_targets(upstream):
@@ -102,7 +102,7 @@ def test_supported_targets(upstream):
         "fakeup.core.Store.double",
         "fakeup.core.Store.build",
     ):
-        _targets.check_supported(_targets.resolve(t))
+        _targets.check_supported(_targets.resolve_attribute(t))
 
 
 @pytest.mark.parametrize("target", ["ssl.SSLContext", "mpat._api.patch", "sys.path", "hashlib"])
