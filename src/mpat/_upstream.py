@@ -59,6 +59,7 @@ _SDIST_SUFFIXES = (".tar.gz", ".zip")
 _INIT = "__init__.py"
 _PY = ".py"
 _AUTHORIZATION = "Authorization"
+_SCHEMES = ("http", "https")
 
 
 class UpstreamUnavailable(MpatError):
@@ -154,9 +155,18 @@ class _KeepAuthOnHost(urllib.request.HTTPRedirectHandler):
         return new
 
 
+def _redacted(url: str) -> str:
+    """Signed download URLs carry their token in the query string; keep it out of CI logs."""
+    parts = urllib.parse.urlsplit(url)
+    netloc = parts.netloc.rpartition("@")[2]
+    return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+
+
 def _get(
     url: str, *, auth: str | None, auth_host: str | None, accept: str | None = None
 ) -> tuple[bytes, str]:
+    if urllib.parse.urlsplit(url).scheme not in _SCHEMES:
+        raise UpstreamUnavailable(f"refusing to download {_redacted(url)}: only http and https")
     request = urllib.request.Request(url)
     if accept:
         request.add_header("Accept", accept)
@@ -167,7 +177,7 @@ def _get(
         with opener.open(request, timeout=TIMEOUT_SECONDS) as response:
             return response.read(), response.headers.get_content_type()
     except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
-        raise UpstreamUnavailable(f"cannot fetch {url}: {exc}") from exc
+        raise UpstreamUnavailable(f"cannot fetch {_redacted(url)}: {exc}") from exc
 
 
 def _links(body: bytes, content_type: str, *, page: str) -> list[_Link]:
@@ -190,25 +200,35 @@ def _links(body: bytes, content_type: str, *, page: str) -> list[_Link]:
     ]
 
 
-def _archive_version(filename: str) -> tuple[Version, bool, bool] | None:
-    """(version, is_wheel, is_pure) for a distribution filename, None for anything else."""
+def _archive_version(filename: str, *, dist: str) -> tuple[Version, bool, bool] | None:
+    """(version, is_wheel, is_pure) for an archive of `dist`, None for anything else.
+
+    The filename comes from the index and becomes a path in the cache, so it must
+    be a bare filename of this very project.
+    """
+    if Path(filename).name != filename or "\\" in filename:
+        return None
     try:
         if filename.endswith(".whl"):
-            _, version, _, tags = parse_wheel_filename(filename)
-            return version, True, any(str(tag) == _PURE_WHEEL_TAG for tag in tags)
-        if filename.endswith(_SDIST_SUFFIXES):
-            _, version = parse_sdist_filename(filename)
-            return version, False, False
+            name, version, _, tags = parse_wheel_filename(filename)
+            is_wheel, is_pure = True, any(str(tag) == _PURE_WHEEL_TAG for tag in tags)
+        elif filename.endswith(_SDIST_SUFFIXES):
+            name, version = parse_sdist_filename(filename)
+            is_wheel, is_pure = False, False
+        else:
+            return None
     except (InvalidWheelFilename, InvalidSdistFilename, InvalidVersion):
         return None
-    return None
+    if name != canonicalize_name(dist):
+        return None
+    return version, is_wheel, is_pure
 
 
-def _pick(links: list[_Link], version: Version) -> _Link | None:
+def _pick(links: list[_Link], *, dist: str, version: Version) -> _Link | None:
     """Prefer a pure wheel, then any wheel, then an sdist, of exactly `version`."""
     ranked: list[tuple[bool, bool, str, _Link]] = []
     for link in links:
-        parsed = _archive_version(link.filename)
+        parsed = _archive_version(link.filename, dist=dist)
         if parsed is None:
             continue
         found, is_wheel, is_pure = parsed
@@ -227,7 +247,7 @@ def _archive(dist: str, version: str) -> Path:
     auth = auth or (_netrc_auth(index_host) if index_host else None)
     page = f"{index.rstrip('/')}/{canonicalize_name(dist)}/"
     body, content_type = _get(page, auth=auth, auth_host=index_host, accept=_ACCEPT)
-    link = _pick(_links(body, content_type, page=page), wanted)
+    link = _pick(_links(body, content_type, page=page), dist=dist, version=wanted)
     if link is None:
         raise UpstreamUnavailable(f"no archive for {dist} {version} on {index}")
     cached = _cache_dir() / link.filename

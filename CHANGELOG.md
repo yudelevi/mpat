@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3
+
+- The archive download behind `mpat diff` and `mpat check --diff` treats the
+  package index as untrusted input. It only picks archives whose name is the
+  locked project's, so a filename like `../../x-1.0.tar.gz` can no longer write
+  outside `MPAT_CACHE_DIR`. It only follows `http` and `https` links, so an
+  index cannot point it at a local `file://` path. Error messages drop query
+  strings and credentials from URLs, so a signed download URL does not end up
+  in a CI log.
+
 ## 0.3.2
 
 - `mpat check` lists only the targets that are not `ok` and ends with an
