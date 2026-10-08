@@ -152,7 +152,7 @@ def test_check_marks_no_source_rows(tmp_path, monkeypatch, capsys):
     monkeypatch.syspath_prepend(str(root))
     _cli.main(["lock"])
     capsys.readouterr()
-    assert _cli.main(["check"]) == _cli.EXIT_OK
+    assert _cli.main(["check", "--all"]) == _cli.EXIT_OK
     assert "[signature-only]" in capsys.readouterr().out
 
 
@@ -209,10 +209,45 @@ def test_check_groups_rows_by_distribution(tmp_path, upstream, monkeypatch, caps
     monkeypatch.syspath_prepend(str(tmp_path))
     _cli.main(["lock"])
     capsys.readouterr()
-    assert _cli.main(["check"]) == _cli.EXIT_OK
+    assert _cli.main(["check", "--all"]) == _cli.EXIT_OK
     lines = capsys.readouterr().out.splitlines()
     assert "# packaging" in lines
     assert "" in lines
+
+
+def test_check_hides_ok_rows_by_default(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    _cli.main(["lock"])
+    capsys.readouterr()
+    assert _cli.main(["check"]) == _cli.EXIT_DRIFT
+    out = capsys.readouterr().out
+    assert "fakeup.core.greet" in out
+    assert "fakeup.REGISTRY" not in out
+    assert "1 ok (--all lists them)" in out.splitlines()
+
+
+def test_check_all_lists_ok_rows(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    _cli.main(["lock"])
+    capsys.readouterr()
+    assert _cli.main(["check", "--all"]) == _cli.EXIT_DRIFT
+    out = capsys.readouterr().out
+    assert "fakeup.REGISTRY" in out
+    assert "1 ok" in out.splitlines()
+
+
+def test_check_all_ok_prints_only_the_count(tmp_path, upstream, monkeypatch, capsys):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\nmodules = ["app_patches"]\n'
+    )
+    (tmp_path / "app_patches.py").write_text('import mpat\n\nmpat.watch("fakeup.core.greet")\n')
+    monkeypatch.syspath_prepend(str(tmp_path))
+    _cli.main(["lock"])
+    capsys.readouterr()
+    assert _cli.main(["check"]) == _cli.EXIT_OK
+    assert capsys.readouterr().out == "1 ok (--all lists them)\n"
 
 
 CONFIG_WATCHES = """
@@ -255,7 +290,7 @@ def test_config_watch_table_prints_pyproject_as_source(tmp_path, upstream, capsy
     config_only_project(tmp_path)
     _cli.main(["lock"])
     capsys.readouterr()
-    assert _cli.main(["check"]) == _cli.EXIT_OK
+    assert _cli.main(["check", "--all"]) == _cli.EXIT_OK
     assert "pyproject.toml" in capsys.readouterr().out
 
 
@@ -323,7 +358,8 @@ def test_mpat_toml_watch_locks_with_mpat_toml_as_source(tmp_path, upstream, caps
     assert _cli.main(["lock"]) == _cli.EXIT_OK
     lock = _lock.read_lock(_lock.lock_path(tmp_path))
     assert lock.entries["fakeup.core.greet"].declared_in == "mpat.toml"
-    assert _cli.main(["check"]) == _cli.EXIT_OK
+    capsys.readouterr()
+    assert _cli.main(["check", "--all"]) == _cli.EXIT_OK
     assert "mpat.toml" in capsys.readouterr().out
 
 
@@ -373,3 +409,210 @@ def test_diff_unlocked_target_is_a_usage_error(tmp_path, upstream, monkeypatch, 
     monkeypatch.syspath_prepend(str(root))
     assert _cli.main(["diff", "fakeup.core.greet"]) == _cli.EXIT_USAGE
     assert "not in mpat.lock" in capsys.readouterr().err
+
+
+def test_check_lists_changed_fields_under_the_row(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    _cli.main(["lock"])
+    capsys.readouterr()
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 2")
+    upstream.edit("core.py", 'def greet(name, punct="!")', 'def greet(name, punct="?", loud=False)')
+    assert _cli.main(["check"]) == _cli.EXIT_DRIFT
+    lines = capsys.readouterr().out.splitlines()
+    assert "    value_repr: 16 -> 2" in lines
+    assert any(line.startswith("    signature: (name, punct='!') -> ") for line in lines)
+    assert not any("source_hash" in line for line in lines)
+
+
+def test_check_json_carries_changes(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    _cli.main(["lock"])
+    capsys.readouterr()
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 2")
+    _cli.main(["check", "--json"])
+    by_target = {r["target"]: r for r in json.loads(capsys.readouterr().out)}
+    assert by_target["fakeup.LIMIT"]["changes"] == ["value_repr: 16 -> 2"]
+    assert by_target["fakeup.REGISTRY"]["changes"] == []
+
+
+def test_check_footer_for_docstring_only_drift(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    _cli.main(["lock"])
+    upstream.edit(
+        "core.py",
+        'def greet(name, punct="!"):\n',
+        'def greet(name, punct="!"):\n    """Say hi."""\n',
+    )
+    capsys.readouterr()
+    assert _cli.main(["check"]) == _cli.EXIT_DRIFT
+    out = capsys.readouterr().out
+    assert any(line.startswith("docstring  patch") for line in out.splitlines())
+    assert "1 docstring-only: skim the upstream docs change, then run 'mpat lock'" in out
+    assert "drifted" not in out
+
+
+def test_check_reports_a_deleted_patch_target_as_missing(tmp_path, upstream, monkeypatch, capsys):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\nmodules = ["app_patches"]\n'
+    )
+    (tmp_path / "app_patches.py").write_text(
+        textwrap.dedent(
+            """
+            import mpat
+
+            @mpat.patch("fakeup.core.Store.add")
+            def add(original, self, item):
+                return original(self, item)
+
+            mpat.watch("fakeup.core.Store.double")
+            """
+        )
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    _cli.main(["lock"])
+    upstream.edit("core.py", "def add(", "def put(")
+    upstream.edit("core.py", "def double(", "def twice(")
+    _registry.reset()
+    sys.modules.pop("app_patches", None)
+    capsys.readouterr()
+    assert _cli.main(["check"]) == _cli.EXIT_DRIFT
+    lines = capsys.readouterr().out.splitlines()
+    assert any(line.startswith("missing    patch      fakeup.core.Store.add") for line in lines)
+    assert any(line.startswith("missing    watch      fakeup.core.Store.double") for line in lines)
+    assert _cli.main(["check", "--gitlab"]) == _cli.EXIT_DRIFT
+    issues = json.loads(capsys.readouterr().out)
+    assert [i["check_name"] for i in issues] == ["mpat/missing", "mpat/missing"]
+
+
+def test_check_against_a_lock_written_before_code_hash(tmp_path, upstream, monkeypatch, capsys):
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    _cli.main(["lock"])
+    path = _lock.lock_path(root)
+    path.write_text(
+        "".join(
+            line for line in path.read_text().splitlines(keepends=True) if "code_hash" not in line
+        )
+    )
+    capsys.readouterr()
+    assert _cli.main(["check", "--all"]) == _cli.EXIT_DRIFT
+    out = capsys.readouterr().out
+    assert "body" not in out
+    assert "1 ok" in out.splitlines()
+
+
+SHARED_DEPENDENCY = """
+import mpat
+
+
+@mpat.patch("fakeup.core.greet", depends_on=["fakeup.LIMIT"])
+def shout(original, name, punct="!"):
+    return original(name, punct).upper()
+
+
+@mpat.patch("fakeup.core.Store.add", depends_on=["fakeup.LIMIT"])
+def add(original, self, item):
+    return original(self, item)
+
+
+mpat.watch("fakeup.DEBUG")
+
+
+@mpat.patch("fakeup.core.Store.double", depends_on=["fakeup.DEBUG"])
+def double(original, x):
+    return original(x)
+"""
+
+
+def shared_dependency_project(tmp_path: Path) -> Path:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\nmodules = ["app_patches"]\n'
+    )
+    (tmp_path / "app_patches.py").write_text(SHARED_DEPENDENCY)
+    return tmp_path
+
+
+def test_check_lists_every_declaration_using_a_drifted_target(
+    tmp_path, upstream, monkeypatch, capsys
+):
+    root = shared_dependency_project(tmp_path)
+    monkeypatch.syspath_prepend(str(root))
+    _cli.main(["lock"])
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 2")
+    upstream.edit("__init__.py", "DEBUG = False", "DEBUG = True")
+    capsys.readouterr()
+    assert _cli.main(["check"]) == _cli.EXIT_DRIFT
+    lines = capsys.readouterr().out.splitlines()
+    assert "    used by: app_patches.py:10 (patch fakeup.core.Store.add)" in lines
+    assert "    used by: app_patches.py:18 (patch fakeup.core.Store.double)" in lines
+
+
+def drifted_with_index(tmp_path, upstream, index, monkeypatch) -> Path:
+    root = project(tmp_path, upstream)
+    monkeypatch.syspath_prepend(str(root))
+    upstream.install_dist("1.0")
+    _cli.main(["lock"])
+    upstream.build_wheel(index.files, "1.0")
+    upstream.edit("core.py", 'f"hi {name}{punct}"', 'f"hey {name}{punct}"')
+    upstream.install_dist("1.1")
+    _registry.reset()
+    sys.modules.pop("app_patches", None)
+    return root
+
+
+def test_check_diff_shows_the_upstream_change_under_the_row(
+    tmp_path, upstream, index, monkeypatch, capsys
+):
+    drifted_with_index(tmp_path, upstream, index, monkeypatch)
+    capsys.readouterr()
+    assert _cli.main(["check", "--diff"]) == _cli.EXIT_DRIFT
+    lines = capsys.readouterr().out.splitlines()
+    row = next(i for i, line in enumerate(lines) if line.startswith("body       patch"))
+    assert lines[row + 1] == (
+        "    body[patch] fakeup.core.greet: the upstream body changed (1.0 -> 1.1)"
+    )
+    assert '    5   | -     return f"hi {name}{punct}"' in lines
+    assert '      5 | +     return f"hey {name}{punct}"' in lines
+    assert "    info: also used by" not in "\n".join(lines)
+
+
+def test_check_without_diff_never_fetches(tmp_path, upstream, index, monkeypatch, capsys):
+    drifted_with_index(tmp_path, upstream, index, monkeypatch)
+    _cli.main(["check"])
+    _cli.main(["check", "--json"])
+    _cli.main(["check", "--json", "--diff"])
+    _cli.main(["check", "--gitlab", "--diff"])
+    assert index.requests == []
+
+
+def test_check_diff_survives_an_unreachable_index(tmp_path, upstream, index, monkeypatch, capsys):
+    drifted_with_index(tmp_path, upstream, index, monkeypatch)
+    index.server.shutdown()
+    index.server.server_close()
+    capsys.readouterr()
+    assert _cli.main(["check", "--diff"]) == _cli.EXIT_DRIFT
+    assert "info: upstream diff unavailable: cannot fetch" in capsys.readouterr().out
+
+
+def test_diff_target_adds_the_block(tmp_path, upstream, index, monkeypatch, capsys):
+    drifted_with_index(tmp_path, upstream, index, monkeypatch)
+    capsys.readouterr()
+    assert _cli.main(["diff", "fakeup.core.greet"]) == _cli.EXIT_DRIFT
+    out = capsys.readouterr().out
+    assert out.startswith("status: body\n")
+    assert "body[patch] fakeup.core.greet: the upstream body changed (1.0 -> 1.1)" in out
+
+
+def test_diff_without_target_shows_every_drifted_block(
+    tmp_path, upstream, index, monkeypatch, capsys
+):
+    drifted_with_index(tmp_path, upstream, index, monkeypatch)
+    capsys.readouterr()
+    assert _cli.main(["diff"]) == _cli.EXIT_DRIFT
+    out = capsys.readouterr().out
+    assert out.startswith("body[patch] fakeup.core.greet:")
+    assert "fakeup.LIMIT" not in out

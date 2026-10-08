@@ -14,12 +14,14 @@ from mpat._errors import LockError, MpatError, TargetNotFound
 from mpat._fingerprint import (
     BODY,
     CONTENT,
+    DOCSTRING,
     MOVED,
     NO_SOURCE,
     OK,
     SIGNATURE,
     VALUE,
     Fingerprint,
+    changed_fields,
     compare,
     fingerprint,
 )
@@ -32,6 +34,7 @@ from mpat._lock import (
     UNLOCKED,
     CheckResult,
     Lock,
+    Usage,
     build_lock,
     check,
     lock_path,
@@ -39,7 +42,9 @@ from mpat._lock import (
     write_lock,
 )
 from mpat._registry import collect_declarations
+from mpat._render import DIFF_STATUSES, diff_block
 from mpat._targets import ResolvedFile, resolve
+from mpat._upstream import UpstreamUnavailable, installed_source, locked_source
 
 EXIT_OK = 0
 EXIT_DRIFT = 1
@@ -58,6 +63,9 @@ _NO_SOURCE_MARKER = " [signature-only]"
 _NO_SOURCE_NOTICE = "no source available, only the signature is locked"
 _NO_DIST = "(no distribution)"
 _MISSING_CELL = "(missing)"
+_OK_HIDDEN_HINT = " (--all lists them)"
+_CHANGE_INDENT = "    "
+_NOTHING_TO_DIFF = "no drifted targets to diff"
 _DRIFT_STATUSES = (MISSING, MOVED, SIGNATURE, BODY, CONTENT, VALUE, NO_SOURCE)
 _FOOTERS: tuple[tuple[tuple[str, ...], str], ...] = (
     ((UNLOCKED,), "unlocked: run 'mpat lock'"),
@@ -65,6 +73,7 @@ _FOOTERS: tuple[tuple[tuple[str, ...], str], ...] = (
         _DRIFT_STATUSES,
         "drifted: read the upstream change, then fix or delete the patch and run 'mpat lock'",
     ),
+    ((DOCSTRING,), "docstring-only: skim the upstream docs change, then run 'mpat lock'"),
     ((STALE,), "stale: run 'mpat lock' to prune"),
     ((REVIEW,), "due for review"),
 )
@@ -122,22 +131,48 @@ def _status_cell(result: CheckResult) -> str:
     return result.status + (_NO_SOURCE_MARKER if result.no_source else "")
 
 
-def _print_footer(results: Sequence[CheckResult]) -> None:
+def _print_footer(results: Sequence[CheckResult], *, ok_hidden: bool, after_rows: bool) -> None:
     lines = [
         f"{count} {advice}"
         for statuses, advice in _FOOTERS
         if (count := sum(1 for r in results if r.status in statuses))
     ]
+    if ok_count := sum(1 for r in results if r.status == OK):
+        lines.append(f"{ok_count} {OK}" + (_OK_HIDDEN_HINT if ok_hidden else ""))
     if lines:
-        print()
+        if after_rows:
+            print()
         print("\n".join(lines))
 
 
-def _print_table(results: Sequence[CheckResult]) -> None:
-    status_width = max([_STATUS_WIDTH, *(len(_status_cell(r)) for r in results)])
-    target_width = max((len(r.target) for r in results), default=0)
-    source_width = max((len(r.declared_in) for r in results), default=0)
-    ordered = sorted(results, key=lambda r: (r.dist or "", r.target))
+def _usage_cell(usage: Usage) -> str:
+    where = (
+        usage.declared_in
+        if usage.declared_line is None
+        else f"{usage.declared_in}:{usage.declared_line}"
+    )
+    return f"{where} ({usage.role} {usage.target})"
+
+
+def _source_block(result: CheckResult, lock: Lock) -> list[str]:
+    entry = lock.entries.get(result.target)
+    if result.status not in DIFF_STATUSES or entry is None:
+        return []
+    try:
+        old, unavailable = locked_source(entry), None
+    except UpstreamUnavailable as exc:
+        old, unavailable = None, str(exc)
+    return diff_block(result, old=old, new=installed_source(result.target), unavailable=unavailable)
+
+
+def _print_table(
+    results: Sequence[CheckResult], *, show_ok: bool, diff_from: Lock | None = None
+) -> None:
+    shown = results if show_ok else [r for r in results if r.status != OK]
+    status_width = max([_STATUS_WIDTH, *(len(_status_cell(r)) for r in shown)])
+    target_width = max((len(r.target) for r in shown), default=0)
+    source_width = max((len(r.declared_in) for r in shown), default=0)
+    ordered = sorted(shown, key=lambda r: (r.dist or "", r.target))
     previous: str | None = None
     for r in ordered:
         group = r.dist or _NO_DIST
@@ -155,18 +190,26 @@ def _print_table(results: Sequence[CheckResult]) -> None:
             f"{r.target:<{target_width}} {r.declared_in:<{source_width}}{versions}{note}"
         )
         print(row.rstrip())
-    _print_footer(ordered)
+        for change in r.changes:
+            print(f"{_CHANGE_INDENT}{change}".rstrip())
+        block = _source_block(r, diff_from) if diff_from is not None else []
+        if not block:
+            for usage in r.used_by:
+                print(f"{_CHANGE_INDENT}used by: {_usage_cell(usage)}")
+        for line in block:
+            print(f"{_CHANGE_INDENT}{line}".rstrip())
+    _print_footer(results, ok_hidden=not show_ok, after_rows=bool(ordered))
+
+
+def _check(config: Config, lock: Lock) -> list[CheckResult]:
+    declarations = collect_declarations(config, apply=False)
+    return check(declarations, lock, root=config.root, today=date.today())
 
 
 def cmd_check(args: argparse.Namespace) -> int:
     config = _require_config()
-    declarations = collect_declarations(config, apply=False)
-    results = check(
-        declarations,
-        _existing_lock(config.root),
-        root=config.root,
-        today=date.today(),
-    )
+    lock = _existing_lock(config.root)
+    results = _check(config, lock)
     if args.json:
         print(json.dumps([dataclasses.asdict(r) for r in results], indent=_JSON_INDENT))
     elif args.gitlab:
@@ -179,7 +222,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     elif not results:
         print(_NO_DECLARATIONS)
     else:
-        _print_table(results)
+        _print_table(results, show_ok=args.all, diff_from=lock if args.diff else None)
     return EXIT_OK if all(r.status == OK for r in results) else EXIT_DRIFT
 
 
@@ -200,17 +243,30 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def _diff_lines(locked: Fingerprint, current: Fingerprint | None) -> list[str]:
-    lines: list[str] = []
-    for name, before in dataclasses.asdict(locked).items():
-        after = _MISSING_CELL if current is None else getattr(current, name)
-        if before != after:
-            lines.append(f"{name}: {before} -> {after}")
-    return lines
+    if current is None:
+        return [
+            f"{name}: {before} -> {_MISSING_CELL}"
+            for name, before in dataclasses.asdict(locked).items()
+        ]
+    return [
+        f"{name}: {before} -> {after}"
+        for name, before, after in changed_fields(locked=locked, current=current)
+    ]
+
+
+def _diff_all(config: Config, lock: Lock) -> int:
+    results = _check(config, lock)
+    blocks = [block for r in results if (block := _source_block(r, lock))]
+    print("\n\n".join("\n".join(block) for block in blocks) if blocks else _NOTHING_TO_DIFF)
+    return EXIT_OK if all(r.status == OK for r in results) else EXIT_DRIFT
 
 
 def cmd_diff(args: argparse.Namespace) -> int:
     config = _require_config()
-    entry = _existing_lock(config.root).entries.get(args.target)
+    lock = _existing_lock(config.root)
+    if args.target is None:
+        return _diff_all(config, lock)
+    entry = lock.entries.get(args.target)
     if entry is None:
         raise MpatError(f"{args.target}: not in {LOCK_FILENAME}")
     try:
@@ -221,6 +277,11 @@ def cmd_diff(args: argparse.Namespace) -> int:
     print(f"status: {status}")
     for line in _diff_lines(entry.fingerprint, current):
         print(line)
+    result = next((r for r in _check(config, lock) if r.target == args.target), None)
+    block = _source_block(result, lock) if result is not None else []
+    if block:
+        print()
+        print("\n".join(block))
     return EXIT_OK if status == OK else EXIT_DRIFT
 
 
@@ -238,6 +299,16 @@ def _parser() -> argparse.ArgumentParser:
         help="print a GitLab Code Quality report of every non-ok target",
     )
     check_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="list ok targets in the table too (default: only their count)",
+    )
+    check_parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="show the upstream source change under each drifted row (fetches the locked release)",
+    )
+    check_parser.add_argument(
         "--repo-root",
         type=Path,
         default=None,
@@ -247,8 +318,10 @@ def _parser() -> argparse.ArgumentParser:
     show_parser = sub.add_parser("show", help="print fingerprint and source of a target")
     show_parser.add_argument("target")
     show_parser.set_defaults(fn=cmd_show)
-    diff_parser = sub.add_parser("diff", help="show which locked fields of a target changed")
-    diff_parser.add_argument("target")
+    diff_parser = sub.add_parser(
+        "diff", help="show how a target, or every drifted target, changed upstream"
+    )
+    diff_parser.add_argument("target", nargs="?")
     diff_parser.set_defaults(fn=cmd_diff)
     return parser
 

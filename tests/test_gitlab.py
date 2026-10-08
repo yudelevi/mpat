@@ -35,7 +35,9 @@ def test_report_lists_only_non_ok_targets(tmp_path, upstream, monkeypatch, capsy
     issues = report(capsys)
     assert [i["check_name"] for i in issues] == ["mpat/value"]
     issue = issues[0]
-    assert issue["description"] == "watch fakeup.LIMIT: the upstream value changed (issue #7)"
+    assert issue["description"] == (
+        "watch fakeup.LIMIT: the upstream value changed (issue #7); value_repr: 16 -> 2"
+    )
     assert issue["severity"] == "major"
     assert issue["location"] == {"path": "app_patches.py", "lines": {"begin": 4}}
 
@@ -109,3 +111,66 @@ def test_json_and_gitlab_are_mutually_exclusive(tmp_path, capsys):
         assert exc.code == _cli.EXIT_USAGE
     else:
         raise AssertionError("expected argparse to reject both flags")
+
+
+def test_line_is_the_declaration_not_the_first_mention(tmp_path, upstream, monkeypatch, capsys):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\nmodules = ["app_patches"]\n'
+    )
+    (tmp_path / "app_patches.py").write_text(
+        "import mpat\n"
+        "\n"
+        "UNRELATED = 'fakeup.core.greet'\n"
+        "\n"
+        "\n"
+        "@mpat.patch(\n"
+        "    'fakeup.core.greet',\n"
+        "    depends_on=['fakeup.LIMIT'],\n"
+        ")\n"
+        "def shout(original, name, punct='!'):\n"
+        "    return original(name, punct).upper()\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    assert _cli.main(["check", "--gitlab"]) == _cli.EXIT_DRIFT
+    lines = {
+        i["description"].split(":")[0]: i["location"]["lines"]["begin"] for i in report(capsys)
+    }
+    assert lines == {"patch fakeup.core.greet": 6, "depends_on fakeup.LIMIT": 6}
+
+
+def test_every_user_of_a_drifted_target_gets_its_own_finding(
+    tmp_path, upstream, monkeypatch, capsys
+):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\n[tool.mpat]\nmodules = ["app_patches"]\n'
+    )
+    (tmp_path / "app_patches.py").write_text(
+        "import mpat\n"
+        "\n"
+        "\n"
+        "@mpat.patch('fakeup.core.greet', depends_on=['fakeup.LIMIT'])\n"
+        "def shout(original, name, punct='!'):\n"
+        "    return original(name, punct)\n"
+        "\n"
+        "\n"
+        "@mpat.patch('fakeup.core.Store.add', depends_on=['fakeup.LIMIT'])\n"
+        "def add(original, self, item):\n"
+        "    return original(self, item)\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    _cli.main(["lock"])
+    upstream.edit("__init__.py", "LIMIT = 16", "LIMIT = 2")
+    capsys.readouterr()
+    assert _cli.main(["check", "--gitlab"]) == _cli.EXIT_DRIFT
+    issues = report(capsys)
+    assert [(i["description"], i["location"]["lines"]["begin"]) for i in issues] == [
+        ("depends_on fakeup.LIMIT: the upstream value changed; value_repr: 16 -> 2", 4),
+        (
+            "patch fakeup.core.Store.add depends on fakeup.LIMIT: "
+            "the upstream value changed; value_repr: 16 -> 2",
+            9,
+        ),
+    ]
+    assert len({i["fingerprint"] for i in issues}) == 2

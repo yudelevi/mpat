@@ -572,3 +572,12 @@ def test_apply_overrides_warns_on_drift_before_assigning(upstream, tmp_path):
     upstream.edit("__init__.py", "LIMIT = 16", "def LIMIT():\n    return 16")
     with pytest.warns(UpstreamDriftWarning, match="moved"), pytest.raises(UnsupportedTarget):
         mpat.apply_overrides()
+
+
+def test_deleted_patch_target_still_raises_outside_collection(upstream):
+    upstream.edit("core.py", "def add(", "def put(")
+    with pytest.raises(TargetNotFound):
+
+        @mpat.patch("fakeup.core.Store.add")
+        def add(original, self, item):
+            return original(self, item)

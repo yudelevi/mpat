@@ -5,8 +5,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from mpat._fingerprint import BODY, CONTENT, MOVED, NO_SOURCE, OK, SIGNATURE, VALUE
-from mpat._lock import MISSING, REVIEW, STALE, UNLOCKED, CheckResult
+from mpat._fingerprint import BODY, CONTENT, DOCSTRING, MOVED, NO_SOURCE, OK, SIGNATURE, VALUE
+from mpat._lock import MISSING, REVIEW, STALE, UNLOCKED, CheckResult, Usage
 
 SEVERITY_BLOCKER = "blocker"
 SEVERITY_MAJOR = "major"
@@ -27,6 +27,7 @@ _SEVERITIES = {
     VALUE: SEVERITY_MAJOR,
     UNLOCKED: SEVERITY_MAJOR,
     NO_SOURCE: SEVERITY_MINOR,
+    DOCSTRING: SEVERITY_MINOR,
     REVIEW: SEVERITY_MINOR,
     STALE: SEVERITY_INFO,
 }
@@ -38,6 +39,7 @@ _DESCRIPTIONS = {
     SIGNATURE: "the upstream signature changed",
     BODY: "the upstream body changed",
     CONTENT: "the upstream file changed",
+    DOCSTRING: "only the upstream docstrings changed",
     VALUE: "the upstream value changed",
     NO_SOURCE: "upstream source is unavailable, only the signature is locked",
     UNLOCKED: f"not in the lock; run '{_CHECK_NAME_PREFIX} lock'",
@@ -85,15 +87,40 @@ def _declaration_line(path: Path, target: str, cache: dict[Path, str]) -> int:
     return _line_in(cache[path], target)
 
 
+def describe(status: str) -> str:
+    return _DESCRIPTIONS.get(status, _UNKNOWN_DESCRIPTION)
+
+
+def _what(result: CheckResult, *, note: str = "") -> str:
+    what = describe(result.status)
+    noted = f" ({note})" if note else ""
+    changes = "".join(f"; {change}" for change in result.changes)
+    return f"{what}{noted}{changes}"
+
+
 def _description(result: CheckResult) -> str:
-    what = _DESCRIPTIONS.get(result.status, _UNKNOWN_DESCRIPTION)
-    note = f" ({result.note})" if result.note else ""
-    return f"{result.role} {result.target}: {what}{note}"
+    return f"{result.role} {result.target}: {_what(result, note=result.note)}"
 
 
-def _fingerprint(path: str, result: CheckResult) -> str:
-    identity = _FINGERPRINT_SEPARATOR.join((path, result.role, result.target))
+def _usage_description(result: CheckResult, usage: Usage) -> str:
+    return f"{usage.role} {usage.target} depends on {result.target}: {_what(result)}"
+
+
+def _fingerprint(*parts: str) -> str:
+    identity = _FINGERPRINT_SEPARATOR.join(parts)
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def _issue(
+    result: CheckResult, *, description: str, fingerprint: str, path: str, line: int
+) -> dict[str, Any]:
+    return {
+        "description": description,
+        "check_name": f"{_CHECK_NAME_PREFIX}/{result.status}",
+        "fingerprint": fingerprint,
+        "severity": _SEVERITIES.get(result.status, _DEFAULT_SEVERITY),
+        "location": {"path": path, "lines": {"begin": line}},
+    }
 
 
 def code_quality_report(
@@ -103,7 +130,8 @@ def code_quality_report(
 
     `location.path` is resolved against the repository root, not against `root`,
     because GitLab reads it relative to the checkout: a `mpat check` run in
-    `services/api` must still report `services/api/src/patches.py`.
+    `services/api` must still report `services/api/src/patches.py`. Every other
+    declaration using a drifted target gets its own issue at its own line.
     """
     base = base or repo_root(root) or root
     cache: dict[Path, str] = {}
@@ -113,15 +141,24 @@ def code_quality_report(
             continue
         path = _report_path(result.declared_in, root=root, base=base)
         report.append(
-            {
-                "description": _description(result),
-                "check_name": f"{_CHECK_NAME_PREFIX}/{result.status}",
-                "fingerprint": _fingerprint(path, result),
-                "severity": _SEVERITIES.get(result.status, _DEFAULT_SEVERITY),
-                "location": {
-                    "path": path,
-                    "lines": {"begin": _declaration_line(base / path, result.target, cache)},
-                },
-            }
+            _issue(
+                result,
+                description=_description(result),
+                fingerprint=_fingerprint(path, result.role, result.target),
+                path=path,
+                line=result.declared_line or _declaration_line(base / path, result.target, cache),
+            )
         )
+        for usage in result.used_by:
+            usage_path = _report_path(usage.declared_in, root=root, base=base)
+            report.append(
+                _issue(
+                    result,
+                    description=_usage_description(result, usage),
+                    fingerprint=_fingerprint(usage_path, result.role, result.target, usage.target),
+                    path=usage_path,
+                    line=usage.declared_line
+                    or _declaration_line(base / usage_path, usage.target, cache),
+                )
+            )
     return report

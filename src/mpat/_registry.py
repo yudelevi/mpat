@@ -44,6 +44,7 @@ class Declaration:
     identity: tuple[str, str]
     status: str = field(default=STATUS_REGISTERED)
     track_value: bool = True
+    declared_line: int | None = None
 
 
 _declarations: dict[tuple[str, str], Declaration] = {}

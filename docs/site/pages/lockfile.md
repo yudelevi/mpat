@@ -70,6 +70,7 @@ no_source = false
 | `dist` | The distribution that installs the target's top-level package |
 | `dist_version` | The installed version of that distribution |
 | `no_source` | True when the target should have had a source hash and did not |
+| `code_hash` | `sha256:` of the same AST node with every docstring removed, so a docstring-only change is told apart from a code change |
 
 Fields with a `None` value are omitted from the table. Entries for constants
 carry `value_repr` instead of `source_hash` and `source_file`; entries for
