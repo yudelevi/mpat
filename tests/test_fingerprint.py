@@ -280,7 +280,7 @@ def test_conditional_definition_hashes_the_live_branch(upstream):
     nodes = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "twice"]
     dead, live = sorted(nodes, key=lambda n: n.lineno)
     assert "dead" in ast.unparse(dead)
-    assert fingerprint_of("fakeup.core.twice").source_hash == fp._hash(live)
+    assert fingerprint_of("fakeup.core.twice").source_hash == fp.hash_node(live)
 
 
 def test_decorated_conditional_definition_hashes_the_live_branch(upstream):
@@ -289,4 +289,47 @@ def test_decorated_conditional_definition_hashes_the_live_branch(upstream):
     tree = ast.parse((upstream.pkg / "core.py").read_text())
     nodes = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "thrice"]
     _, live = sorted(nodes, key=lambda n: n.lineno)
-    assert fingerprint_of("fakeup.core.thrice").source_hash == fp._hash(live)
+    assert fingerprint_of("fakeup.core.thrice").source_hash == fp.hash_node(live)
+
+
+def test_docstring_only_change_is_its_own_status(upstream):
+    before = fingerprint_of("fakeup.core.greet")
+    upstream.edit(
+        "core.py",
+        'def greet(name, punct="!"):\n',
+        'def greet(name, punct="!"):\n    """Say hi."""\n',
+    )
+    after = fingerprint_of("fakeup.core.greet")
+    assert after.source_hash != before.source_hash
+    assert after.code_hash == before.code_hash
+    assert fp.compare(locked=before, current=after) == fp.DOCSTRING
+
+
+def test_nested_docstrings_are_ignored_by_code_hash(upstream):
+    before = fingerprint_of("fakeup.core.Store")
+    upstream.edit(
+        "core.py",
+        "    def add(self, item):\n",
+        '    def add(self, item):\n        """Add one."""\n',
+    )
+    assert fp.compare(locked=before, current=fingerprint_of("fakeup.core.Store")) == fp.DOCSTRING
+
+
+def test_docstring_and_code_change_is_body(upstream):
+    before = fingerprint_of("fakeup.core.greet")
+    upstream.edit(
+        "core.py",
+        'def greet(name, punct="!"):\n    return f"hi',
+        'def greet(name, punct="!"):\n    """Say hi."""\n    return f"hey',
+    )
+    assert fp.compare(locked=before, current=fingerprint_of("fakeup.core.greet")) == fp.BODY
+
+
+def test_lock_without_code_hash_reports_body(upstream):
+    before = dataclasses.replace(fingerprint_of("fakeup.core.greet"), code_hash=None)
+    upstream.edit(
+        "core.py",
+        'def greet(name, punct="!"):\n',
+        'def greet(name, punct="!"):\n    """Say hi."""\n',
+    )
+    assert fp.compare(locked=before, current=fingerprint_of("fakeup.core.greet")) == fp.BODY

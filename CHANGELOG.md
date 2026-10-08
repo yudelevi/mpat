@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.2
+
+- `mpat check` lists only the targets that are not `ok` and ends with an
+  `N ok` count, so a CI log shows the drift instead of burying it in a table
+  of every watched symbol. `--all` restores the full table. `--json`,
+  `--gitlab` and the exit code are unchanged.
+- A target deleted upstream is reported as `missing`. Before, `patch()` and
+  `watch()` resolved their target while `mpat check` was collecting, so the
+  deletion aborted the run with exit 2, no table and an empty GitLab report.
+  Outside collection a missing target still raises `TargetNotFound`.
+- Rows with a changed signature, value, location or kind list the change under
+  them, e.g. `value_repr: 16 -> 2`, and the GitLab description carries the
+  same text. `--json` gains a `changes` list.
+- GitLab Code Quality findings point at the line of the `patch()` or `watch()`
+  call instead of the first line quoting the target, which could be an
+  unrelated string. `--json` gains `declared_line`.
+- A change confined to docstrings reports the new `docstring` status instead of
+  `body`, with its own footer line and `minor` GitLab severity. It still exits 1.
+  The lock gains a `code_hash` field for this; the first `mpat lock` after the
+  upgrade lists every function and class as changed (`~`) while it records it,
+  and until then a docstring change keeps reporting `body`.
+- `mpat diff` and `mpat check --diff` show how a drifted target's upstream
+  source changed, as a diff in the style of a `ty` diagnostic, with the locked
+  and installed line numbers side by side. The lock holds hashes, not source,
+  so the locked side comes from the release archive on the package index
+  (`UV_DEFAULT_INDEX`, `UV_INDEX_URL`, `PIP_INDEX_URL`, else PyPI), cached in
+  `MPAT_CACHE_DIR`. Index credentials never follow a redirect to another
+  host. A fetch failure prints why and leaves the exit code alone. `mpat diff`
+  without a target covers every drifted target, and now imports the
+  configured modules like `mpat check`.
+- A target used by several declarations, such as a shared `depends_on`, lists
+  the others under its row and in `--json` (`used_by`), and GitLab gets one
+  finding per declaration, so every patch that depends on the drift is marked.
+
 ## 0.3.1
 
 - A watch can name a file shipped inside an installed package:

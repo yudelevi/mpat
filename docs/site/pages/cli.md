@@ -49,16 +49,32 @@ mpat: somelib._speedups.encode: no source available, only the signature is locke
 ## `mpat check`
 
 Compares `mpat.lock` against the installed upstream and prints one row per
-target. This is the command for CI and for dependency-bump merge requests.
+target that is not `ok`. This is the command for CI and for dependency-bump
+merge requests.
 
 ```
 $ mpat check
 # somelib
 body       patch      somelib.client.Client.request myapp/patches.py 2.3.1 -> 2.5.0  Works around somelib#123. Delete when fixed.
-ok         depends_on somelib.client.Client._send   myapp/patches.py 2.3.1 -> 2.5.0  Works around somelib#123. Delete when fixed.
 value      watch      somelib.settings.MAX_RETRIES  myapp/patches.py 2.3.1 -> 2.5.0  see somelib#98
 
 2 drifted: read the upstream change, then fix or delete the patch and run 'mpat lock'
+1 ok (--all lists them)
+```
+
+`ok` targets are only counted, so a clean run prints a single line. `--all`
+lists them in the table too.
+
+A target used by more than one declaration lists the others under its row, as
+`used by: myapp/retry.py:40 (patch somelib.retry.backoff)`, so a shared
+dependency that drifted points at every patch that needs a look.
+
+`--diff` adds the [`mpat diff`](#mpat-diff) block under each drifted row. It
+downloads the locked release, so it is opt-in; add it to the CI job to get the
+upstream change in the log:
+
+```yaml
+- uv run mpat check --diff
 ```
 
 The columns are status, role, target, the file the declaration came from, the
@@ -78,6 +94,7 @@ With no declarations at all it prints `no declarations found` and exits 0.
 | `moved` | The target now resolves elsewhere, or its source file changed. |
 | `signature` | The signature changed, or the target switched between sync and async. |
 | `body` | The source hash changed. |
+| `docstring` | The source hash changed, but only in docstrings. |
 | `content` | A watched file's bytes changed. |
 | `value` | A watched constant's value changed. |
 | `no_source` | The locked source is no longer readable, so only the signature is still comparable. |
@@ -88,8 +105,19 @@ With no declarations at all it prints `no declarations found` and exits 0.
 
 Drift beats `review`: a target that both drifted and is overdue reports the drift.
 
+A row with a changed signature, value, location or kind lists the change under
+it, so the table says what moved without a separate `mpat diff`:
+
+```
+signature  patch      somelib.client.Client.request myapp/patches.py 2.3.1 -> 2.5.0
+    signature: (self, method, url, **kwargs) -> (self, method, url, *, timeout, **kwargs)
+```
+
+Hash changes are not listed; `body` and `content` already say that much, and
+`mpat diff TARGET` shows the hashes.
+
 A row whose target currently has no readable source is marked, whatever its
-status:
+status, including `ok` rows listed with `--all`:
 
 ```
 ok [signature-only] watch      somelib._speedups.encode      myapp/patches.py
@@ -106,13 +134,17 @@ lines with a non-zero count are printed.
 ```
 1 unlocked: run 'mpat lock'
 2 drifted: read the upstream change, then fix or delete the patch and run 'mpat lock'
+1 docstring-only: skim the upstream docs change, then run 'mpat lock'
 1 stale: run 'mpat lock' to prune
 1 due for review
+3 ok (--all lists them)
 ```
 
 `unlocked` and `stale` mean the lockfile is out of date with your code, so the
 answer is `mpat lock`. `drifted` means upstream changed under you, so the answer
-is to read the upstream change first.
+is to read the upstream change first. `docstring` still fails the check, because
+a docstring edit can announce a behaviour change, but it is counted apart from
+the drift that needs a code review.
 
 ### `--json`
 
@@ -128,7 +160,10 @@ $ mpat check --json
     "locked_version": "2.3.1",
     "current_version": "2.5.0",
     "no_source": false,
-    "dist": "somelib"
+    "dist": "somelib",
+    "declared_line": 12,
+    "changes": [],
+    "used_by": []
   }
 ]
 ```
@@ -159,7 +194,12 @@ $ mpat check --gitlab
 ```
 
 `missing` and `moved` are `blocker`, the fingerprint mismatches and `unlocked`
-are `major`, `no_source` and `review` are `minor`, `stale` is `info`. The
+are `major`, `no_source`, `docstring` and `review` are `minor`, `stale` is
+`info`. The description ends with the same changed fields the table lists.
+Every other declaration that uses a drifted target gets its own issue at its own
+line, so the merge request marks each patch that depends on it.
+`lines.begin` is the line of the `patch()` or `watch()` call, or for a
+configuration table and a `stale` entry the first line quoting the target. The
 fingerprint is a hash of the path, role and target, so the same drift keeps the
 same identity between runs and GitLab does not report it twice.
 
@@ -217,22 +257,50 @@ or against the version the lockfile recorded.
 
 ## `mpat diff`
 
-Prints the drift status of one locked target, then every fingerprint field whose
-locked value differs from the installed one. It reads `mpat.lock` and resolves
-the target; it does not import `[tool.mpat] modules`.
+Prints the drift status of one locked target, every fingerprint field whose
+locked value differs from the installed one, and then how its upstream source
+changed.
 
 ```
 $ mpat diff somelib.client.Client.request
-status: signature
-signature: (self, method, url, **kwargs) -> (self, method, url, *, timeout=None, **kwargs)
+status: body
 source_hash: sha256:0684635… -> sha256:9b1c7ee…
 dist_version: 2.3.1 -> 2.5.0
+
+body[patch] somelib.client.Client.request: the upstream body changed (2.3.1 -> 2.5.0)
+    --> somelib/client.py:92
+      |
+88 90 |       def request(self, method, url, **kwargs):
+89 91 |           self.log(method)
+90    | -         return self._send(method, url, **kwargs)
+   92 | +         return self._send(method, url, timeout=self.timeout, **kwargs)
+      |
+info: declared here
+    --> myapp/patches.py:12
+info: also used by myapp/retry.py:40 (patch somelib.retry.backoff)
 ```
 
-`ok` prints only the status line. A target that no longer exists prints
-`status: missing` and every locked field against `(missing)`. The lock records
-hashes, not source, so a `body` change shows the two hashes; read the upstream
-diff between the two `dist_version` values for the actual change.
+The two gutter columns are the line numbers in the locked and the installed
+file. `mpat diff` with no target prints the block for every drifted target.
+
+The lock records hashes, not source, so the locked side is downloaded: the
+archive of the locked `dist_version` of the target's distribution, a wheel if
+there is one and the sdist otherwise. The index is the first of
+`UV_DEFAULT_INDEX`, `UV_INDEX_URL` and `PIP_INDEX_URL` that is set, else PyPI.
+Credentials in the index URL, or in `~/.netrc` for its host, are sent to that
+host only, never to a host a download redirects to. Archives are cached in
+`MPAT_CACHE_DIR`, default `~/.cache/mpat`; point it at a CI cache path to keep
+them across jobs. The downloaded definition is hashed again, and a line warns
+when it does not match the lock, which happens when a release was rebuilt or
+ships per-platform code.
+
+Only `body`, `content`, `docstring`, `signature`, `moved` and `missing` get a
+block; `missing` and `moved` show the locked definition as removed. When the
+archive cannot be fetched the block says `info: upstream diff unavailable` and
+why, and the exit code does not change.
+
+`mpat diff` imports `[tool.mpat] modules` like `mpat check`, so the block knows
+where the target is declared and what else uses it.
 
 Exits 0 on `ok`, 1 on any other status, 2 when the target is not in `mpat.lock`.
 

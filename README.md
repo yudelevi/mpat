@@ -120,11 +120,14 @@ next to it. `mpat.toml` wins when both exist.
 
 ```
 mpat lock     # fingerprint everything, write mpat.lock, commit it
-mpat check    # exit 1 unless every target is ok
+mpat check    # exit 1 unless every target is ok; lists only the ones that are not
+mpat check --all   # list ok targets too
+mpat check --diff  # show each drifted target's upstream source change
 mpat check --json
 mpat check --gitlab   # GitLab Code Quality report
 mpat show somelib.client.Client.request
 mpat diff somelib.client.Client.request
+mpat diff     # every drifted target
 ```
 
 `mpat lock` and `mpat check` import the modules listed in `[tool.mpat] modules`
@@ -181,7 +184,8 @@ no_source = false
 An entry whose `role` or `parent` no longer matches the declaration is reported
 `unlocked`: the audit trail changed meaning, so it has to be re-locked.
 
-`mpat check` reports one row per target with one of these statuses:
+`mpat check` reports one row per target with one of these statuses, and
+counts the `ok` ones instead of listing them unless given `--all`:
 
 | Status | Meaning |
 | --- | --- |
@@ -189,6 +193,7 @@ An entry whose `role` or `parent` no longer matches the declaration is reported
 | `moved` | The target now resolves elsewhere, or its source file changed. |
 | `signature` | The signature changed, or the target switched between sync and async. |
 | `body` | The source hash changed. |
+| `docstring` | The source hash changed, but only in docstrings. |
 | `value` | A watched constant's value changed. |
 | `no_source` | The locked source is no longer readable, so only the signature is still comparable. |
 | `missing` | The target no longer exists upstream. |

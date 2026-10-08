@@ -6,6 +6,7 @@ import os
 import tempfile
 import tomllib
 import warnings
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -16,7 +17,7 @@ import tomli_w
 
 from mpat._config import find_project_root
 from mpat._errors import LockError, TargetNotFound
-from mpat._fingerprint import OK, Fingerprint, compare, fingerprint
+from mpat._fingerprint import OK, Fingerprint, compare, fingerprint, readable_changes
 from mpat._registry import ROLE_DEPENDS, Declaration
 from mpat._targets import resolve
 
@@ -41,6 +42,7 @@ _OPTIONAL_STR_FIELDS = (
     "dist",
     "dist_version",
     "parent",
+    "code_hash",
 )
 _TRACK_VALUE_KEY = "track_value"
 _BOOL_FIELDS = ("is_async", "no_source", _TRACK_VALUE_KEY)
@@ -74,6 +76,14 @@ class Wanted:
 
 
 @dataclass(frozen=True)
+class Usage:
+    declared_in: str
+    declared_line: int | None
+    role: str
+    target: str
+
+
+@dataclass(frozen=True)
 class CheckResult:
     target: str
     role: str
@@ -84,6 +94,9 @@ class CheckResult:
     current_version: str | None = None
     no_source: bool = False
     dist: str | None = None
+    declared_line: int | None = None
+    changes: tuple[str, ...] = ()
+    used_by: tuple[Usage, ...] = ()
 
 
 def lock_path(root: Path) -> Path:
@@ -251,14 +264,33 @@ def _status(w: Wanted, entry: LockEntry, current: Fingerprint | None, today: dat
     return result
 
 
+def _users(declarations: Sequence[Declaration]) -> dict[str, list[Declaration]]:
+    users: dict[str, list[Declaration]] = defaultdict(list)
+    for decl in declarations:
+        for target in dict.fromkeys((decl.target, *decl.depends_on)):
+            users[target].append(decl)
+    return users
+
+
 def check(
     declarations: Sequence[Declaration], lock: Lock, *, root: Path, today: date
 ) -> list[CheckResult]:
     results: list[CheckResult] = []
     seen: set[str] = set()
+    users = _users(declarations)
     for w in expand(declarations):
         seen.add(w.target)
         declared_in = _declared_in(w.decl, root)
+        used_by = tuple(
+            Usage(
+                declared_in=_declared_in(d, root),
+                declared_line=d.declared_line,
+                role=d.role,
+                target=d.target,
+            )
+            for d in users[w.target]
+            if d is not w.decl
+        )
         entry = lock.entries.get(w.target)
         current = _current(w.target, track_value=w.track_value)
         if entry is not None and (
@@ -274,6 +306,8 @@ def check(
                     note=w.decl.note,
                     declared_in=declared_in,
                     dist=current.dist if current else None,
+                    declared_line=w.decl.declared_line,
+                    used_by=used_by,
                 )
             )
             continue
@@ -288,6 +322,11 @@ def check(
                 current_version=current.dist_version if current else None,
                 no_source=current.no_source if current else False,
                 dist=current.dist if current else entry.fingerprint.dist,
+                declared_line=w.decl.declared_line,
+                changes=readable_changes(locked=entry.fingerprint, current=current)
+                if current
+                else (),
+                used_by=used_by,
             )
         )
     results.extend(

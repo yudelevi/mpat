@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import ast
+import copy
 import functools
 import hashlib
 import inspect
 import os
 import sys
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from importlib import metadata
 from pathlib import Path
 from typing import Any
@@ -28,12 +29,16 @@ BODY = "body"
 CONTENT = "content"
 VALUE = "value"
 NO_SOURCE = "no_source"
+DOCSTRING = "docstring"
 
 HASH_PREFIX = "sha256:"
 SCALARS = (int, str, bool, float, type(None))
 _DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+SourceNode = ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 _BLOCKS = (ast.If, ast.Try, ast.With, ast.For, ast.While)
 _ASYNC_KINDS = (ASYNC, ASYNCGEN)
+_UNREADABLE_FIELDS = frozenset({"source_hash", "code_hash", "dist", "dist_version", "no_source"})
+_DOCSTRING_OWNERS = (ast.Module, *_DEFS)
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,7 @@ class Fingerprint:
     dist: str | None = None
     dist_version: str | None = None
     no_source: bool = False
+    code_hash: str | None = None
 
 
 def _iter_defs(
@@ -64,11 +70,11 @@ def _iter_defs(
                 yield from _iter_defs(handler.body)
 
 
-def _first_line(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> int:
+def first_line(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> int:
     return min([node.lineno, *(d.lineno for d in node.decorator_list)])
 
 
-def _definition_node(
+def definition_node(
     tree: ast.Module, qualname: str, *, lineno: int | None = None
 ) -> ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | None:
     if "<locals>" in qualname:
@@ -84,19 +90,19 @@ def _definition_node(
     candidates = [n for n in _iter_defs(body) if n.name == leaf]
     if not candidates:
         return None
-    at_line = [n for n in candidates if _first_line(n) == lineno]
+    at_line = [n for n in candidates if first_line(n) == lineno]
     return at_line[0] if at_line else candidates[0]
 
 
-def _hash(node: ast.AST) -> str:
-    return _hash_bytes(ast.unparse(node).encode())
+def hash_node(node: ast.AST) -> str:
+    return hash_bytes(ast.unparse(node).encode())
 
 
-def _hash_bytes(data: bytes) -> str:
+def hash_bytes(data: bytes) -> str:
     return HASH_PREFIX + hashlib.sha256(data).hexdigest()
 
 
-def _source_file(obj: Any) -> str | None:
+def source_path(obj: Any) -> str | None:
     try:
         file = inspect.getsourcefile(obj)
     except TypeError:
@@ -109,19 +115,34 @@ def _source_file(obj: Any) -> str | None:
 _SOURCE_FAILURES = (OSError, UnicodeDecodeError, SyntaxError, ValueError)
 
 
-def _source_hash(obj: Any, file: str) -> str | None:
+def source_node(obj: Any, file: str) -> SourceNode | None:
     try:
         tree = ast.parse(Path(file).read_text(encoding="utf-8"))
     except _SOURCE_FAILURES:
         return None
     if inspect.ismodule(obj):
-        return _hash(tree)
+        return tree
     qualname = getattr(obj, "__qualname__", None)
     if not qualname:
         return None
     code = getattr(obj, "__code__", None)
-    node = _definition_node(tree, qualname, lineno=getattr(code, "co_firstlineno", None))
-    return None if node is None else _hash(node)
+    return definition_node(tree, qualname, lineno=getattr(code, "co_firstlineno", None))
+
+
+def _is_docstring(stmt: ast.stmt) -> bool:
+    return (
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Constant)
+        and isinstance(stmt.value.value, str)
+    )
+
+
+def _without_docstrings(node: ast.AST) -> ast.AST:
+    stripped = copy.deepcopy(node)
+    for owner in ast.walk(stripped):
+        if isinstance(owner, _DOCSTRING_OWNERS) and owner.body and _is_docstring(owner.body[0]):
+            owner.body = owner.body[1:] or [ast.Pass()]
+    return stripped
 
 
 def _kind(obj: Any) -> str:
@@ -168,7 +189,7 @@ def _dist(top: str) -> tuple[str | None, str | None]:
     return names[0], metadata.version(names[0])
 
 
-def _relative_source(file: str, top: str) -> str:
+def relative_source(file: str, top: str) -> str:
     module = sys.modules.get(top)
     module_file = getattr(module, "__file__", None)
     search_path = [Path(entry) for entry in getattr(module, "__path__", [])]
@@ -199,7 +220,7 @@ def _fingerprint_file(resolved: ResolvedFile) -> Fingerprint:
     return Fingerprint(
         kind=KIND_FILE,
         resolved=resolved.target,
-        source_hash=_hash_bytes(resolved.read_bytes()),
+        source_hash=hash_bytes(resolved.read_bytes()),
         source_file=resolved.target,
         dist=dist,
         dist_version=dist_version,
@@ -230,8 +251,9 @@ def fingerprint(resolved: Resolved | ResolvedFile, *, track_value: bool = True) 
         value_repr = None
 
     hash_target = inspect.unwrap(raw_target) if raw_target is not None else None
-    file = _source_file(hash_target) if hash_target is not None else None
-    source_hash = _source_hash(hash_target, file) if file else None
+    file = source_path(hash_target) if hash_target is not None else None
+    node = source_node(hash_target, file) if file else None
+    source_hash = hash_node(node) if node is not None else None
     expects_source = hash_target is not None
     return Fingerprint(
         kind=kind,
@@ -240,10 +262,28 @@ def fingerprint(resolved: Resolved | ResolvedFile, *, track_value: bool = True) 
         signature=_signature(obj) if kind == KIND_FUNCTION else None,
         source_hash=source_hash,
         value_repr=value_repr,
-        source_file=_relative_source(file, top) if file else None,
+        source_file=relative_source(file, top) if file else None,
         dist=dist,
         dist_version=dist_version,
         no_source=expects_source and source_hash is None,
+        code_hash=hash_node(_without_docstrings(node)) if node is not None else None,
+    )
+
+
+def changed_fields(*, locked: Fingerprint, current: Fingerprint) -> list[tuple[str, Any, Any]]:
+    return [
+        (f.name, before, after)
+        for f in fields(Fingerprint)
+        if (before := getattr(locked, f.name)) != (after := getattr(current, f.name))
+    ]
+
+
+def readable_changes(*, locked: Fingerprint, current: Fingerprint) -> tuple[str, ...]:
+    """The changed fields a reviewer can act on; hashes and versions are shown elsewhere."""
+    return tuple(
+        f"{name}: {before} -> {after}"
+        for name, before, after in changed_fields(locked=locked, current=current)
+        if name not in _UNREADABLE_FIELDS
     )
 
 
@@ -261,5 +301,9 @@ def compare(*, locked: Fingerprint, current: Fingerprint) -> str:
     if locked.source_hash is not None and current.source_hash is None:
         return NO_SOURCE
     if locked.source_hash != current.source_hash:
-        return CONTENT if locked.kind == KIND_FILE else BODY
+        if locked.kind == KIND_FILE:
+            return CONTENT
+        if locked.code_hash is not None and locked.code_hash == current.code_hash:
+            return DOCSTRING
+        return BODY
     return OK

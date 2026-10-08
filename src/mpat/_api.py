@@ -75,12 +75,13 @@ class Replacement(Protocol):
 
 
 F = TypeVar("F", bound=Replacement)
+T = TypeVar("T")
 log = logging.getLogger("mpat")
 
 
-def _caller_file() -> str:
+def _caller() -> tuple[str, int]:
     frame = inspect.stack()[_DECLARATION_FRAME_DEPTH]
-    return os.path.abspath(frame.filename)
+    return os.path.abspath(frame.filename), frame.lineno
 
 
 def _allow() -> tuple[str, ...]:
@@ -211,6 +212,16 @@ def _check_kind(fn: Replacement, resolved: Resolved) -> None:
         )
 
 
+def _resolve_declared(resolver: Callable[[str], T], target: str) -> T | None:
+    """While collecting, a target deleted upstream is left for check() to report as missing."""
+    try:
+        return resolver(target)
+    except TargetNotFound:
+        if collect_mode():
+            return None
+        raise
+
+
 def _resolve_patchable(canonical: str) -> Resolved:
     resolved = resolve_attribute(canonical)
     check_supported(resolved)
@@ -257,8 +268,8 @@ def patch(
         raise ValueError(f"on_drift must be one of {ON_DRIFT_VALUES}, got {on_drift!r}")
     canonical = canonical_target(target)
     _check_declaration_forbidden(canonical, depends_on)
-    resolved = None if when_imported else _resolve_patchable(canonical)
-    declared_in = _caller_file()
+    resolved = None if when_imported else _resolve_declared(_resolve_patchable, canonical)
+    declared_in, declared_line = _caller()
 
     def decorator(fn: F) -> F:
         if resolved is not None:
@@ -272,6 +283,7 @@ def patch(
             review_by=review_by,
             note=note,
             declared_in=declared_in,
+            declared_line=declared_line,
             identity=(declared_in, fn.__qualname__),
         )
         register(decl)
@@ -331,8 +343,8 @@ def watch(
 ) -> None:
     canonical = canonical_target(target)
     _check_declaration_forbidden(canonical, depends_on)
-    resolved = resolve(canonical)
-    declared_in = _caller_file()
+    resolved = _resolve_declared(resolve, canonical)
+    declared_in, declared_line = _caller()
     decl = Declaration(
         target=canonical,
         role=ROLE_WATCH,
@@ -342,11 +354,12 @@ def watch(
         review_by=review_by,
         note=note,
         declared_in=declared_in,
+        declared_line=declared_line,
         identity=(declared_in, f"watch:{canonical}"),
         track_value=track_value,
     )
     register(decl)
-    if collect_mode():
+    if resolved is None or collect_mode():
         return
     _handle_drift(decl, resolved)
     decl.status = STATUS_WATCHED
