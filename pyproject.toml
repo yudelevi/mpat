@@ -1,6 +1,6 @@
 [project]
 name = "mpat"
-version = "0.3.2"
+version = "0.3.3"
 description = "Lockfile-based upstream drift tracking for Python monkeypatches"
 readme = "README.md"
 license = "MIT"

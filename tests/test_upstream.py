@@ -136,3 +136,43 @@ def test_unwritable_cache_is_unavailable(upstream, index, locked, monkeypatch, t
     upstream.build_wheel(index.files, "1.0")
     with pytest.raises(_upstream.UpstreamUnavailable, match="cannot cache"):
         _upstream.locked_source(locked)
+
+
+def test_archive_of_another_project_is_ignored(upstream, index, locked):
+    upstream.build_wheel(index.files, "1.0")
+    (index.files / "fakeup-1.0-py3-none-any.whl").rename(index.files / "other-1.0.tar.gz")
+    with pytest.raises(_upstream.UpstreamUnavailable, match="no archive for fakeup 1.0"):
+        _upstream.locked_source(locked)
+
+
+def test_index_filenames_cannot_escape_the_cache(upstream, index, locked, monkeypatch):
+    links = [
+        _upstream._Link(filename="../../fakeup-1.0.tar.gz", url=f"{index.url}/x"),
+        _upstream._Link(filename="fakeup/../../fakeup-1.0.tar.gz", url=f"{index.url}/x"),
+    ]
+    monkeypatch.setattr(_upstream, "_links", lambda *a, **k: links)
+    with pytest.raises(_upstream.UpstreamUnavailable, match="no archive for fakeup 1.0"):
+        _upstream.locked_source(locked)
+
+
+def test_non_http_download_links_are_refused(upstream, index, locked, monkeypatch, tmp_path):
+    secret = tmp_path / "secret"
+    secret.write_text("x")
+    links = [_upstream._Link(filename="fakeup-1.0.tar.gz", url=secret.as_uri())]
+    monkeypatch.setattr(_upstream, "_links", lambda *a, **k: links)
+    with pytest.raises(_upstream.UpstreamUnavailable, match="refusing to download"):
+        _upstream.locked_source(locked)
+
+
+def test_errors_do_not_print_signed_query_strings(upstream, index, locked, monkeypatch):
+    links = [
+        _upstream._Link(
+            filename="fakeup-1.0.tar.gz",
+            url=f"{index.url.removesuffix('/simple')}/missing?X-Amz-Signature=s3cret",
+        )
+    ]
+    monkeypatch.setattr(_upstream, "_links", lambda *a, **k: links)
+    with pytest.raises(_upstream.UpstreamUnavailable) as raised:
+        _upstream.locked_source(locked)
+    assert "s3cret" not in str(raised.value)
+    assert "/missing" in str(raised.value)
