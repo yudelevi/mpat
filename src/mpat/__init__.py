@@ -15,7 +15,7 @@ from mpat._errors import (
 )
 from mpat._until import Probe, Until, Version
 
-__version__ = "0.3.3"
+__version__ = "0.3.4"
 
 __all__ = [
     "AlreadyPatched",
