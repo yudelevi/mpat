@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+
+- Python 3.15 is supported and tested in CI.
+
 ## 0.3.3
 
 - The archive download behind `mpat diff` and `mpat check --diff` treats the
